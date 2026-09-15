@@ -301,3 +301,33 @@ test("finds the requested listing ID directly inside JSON arrays", () => {
 
   assert.equal(parseListingDetailFromPage(html, "requested-id").title, "Desk");
 });
+
+test("preserves skeleton Marketplace feed units as hydration stubs", () => {
+  const result = parseSearchResponse({
+    data: {
+      marketplace_search: {
+        feed_units: {
+          edges: [
+            { node: { story_key: "123", tracking: "opaque" } },
+            { node: { top_level_post_id: "456" } },
+          ],
+          page_info: { has_next_page: true, end_cursor: "next-stub" },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    result.listings.map(({ id, title, needsHydration }) => ({
+      id,
+      title,
+      needsHydration,
+    })),
+    [
+      { id: "123", title: "", needsHydration: true },
+      { id: "456", title: "", needsHydration: true },
+    ],
+  );
+  assert.equal(result.hasNextPage, true);
+  assert.equal(result.endCursor, "next-stub");
+});

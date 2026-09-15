@@ -7,7 +7,7 @@ import type {
 import {
   cookiesToHeader,
   getCookieValue,
-  loadFacebookSession,
+  loadFacebookSessionFlexible,
 } from "./auth.js";
 import {
   MARKETPLACE_SEARCH_DOC_ID,
@@ -75,18 +75,24 @@ const BROWSER_HEADERS: Record<string, string> = {
 export class FacebookClient {
   private session: FacebookSession | null = null;
   private rateLimiter: RateLimiter;
+  private pageRateLimiter: RateLimiter;
   private reqCounter = 0;
   private sessionFile?: string;
+  private chromeProfile?: string;
   private userAgent = "";
 
   constructor(
     options: {
       maxRequestsPerMinute?: number;
+      maxPageFetchesPerMinute?: number;
       sessionFile?: string;
+      chromeProfile?: string;
     } = {},
   ) {
     this.rateLimiter = new RateLimiter(options.maxRequestsPerMinute ?? 3);
+    this.pageRateLimiter = new RateLimiter(options.maxPageFetchesPerMinute ?? 30);
     this.sessionFile = options.sessionFile;
+    this.chromeProfile = options.chromeProfile;
   }
 
   async ensureSession(): Promise<FacebookSession> {
@@ -113,8 +119,9 @@ export class FacebookClient {
   }
 
   async initSession(): Promise<FacebookSession> {
-    const { cookies, userAgent } = loadFacebookSession({
+    const { cookies, userAgent } = loadFacebookSessionFlexible({
       sessionFile: this.sessionFile,
+      chromeProfile: this.chromeProfile,
     });
 
     if (cookies.length === 0) {
@@ -323,14 +330,91 @@ export class FacebookClient {
   }
 
   async searchListings(params: SearchParams): Promise<SearchResult> {
+    const maxPages = Math.max(1, Math.floor(params.maxPages ?? 1));
+    if (maxPages === 1) return this.searchListingsPage(params);
+
+    const listings: SearchResult["listings"] = [];
+    const seenIds = new Set<string>();
+    let cursor = params.cursor;
+    let hasNextPage = false;
+    let endCursor: string | null = null;
+
+    for (let pageNumber = 0; pageNumber < maxPages; pageNumber++) {
+      const page = await this.searchListingsPage(
+        {
+          ...params,
+          cursor,
+          maxPages: 1,
+        },
+        {
+          excludeIds: seenIds,
+          maxResults: Math.max(1, params.limit - listings.length),
+        },
+      );
+      for (const listing of page.listings) {
+        if (seenIds.has(listing.id)) continue;
+        seenIds.add(listing.id);
+        listings.push(listing);
+        if (listings.length >= params.limit) break;
+      }
+
+      hasNextPage = page.hasNextPage;
+      endCursor = page.endCursor;
+      if (listings.length >= params.limit) break;
+      if (!page.hasNextPage || !page.endCursor) break;
+      cursor = page.endCursor;
+    }
+
+    return { listings, hasNextPage, endCursor };
+  }
+
+  private async searchListingsPage(
+    params: SearchParams,
+    options: {
+      excludeIds?: ReadonlySet<string>;
+      maxResults?: number;
+    } = {},
+  ): Promise<SearchResult> {
     const variables = buildSearchVariables(params);
     const data = await this.graphqlRequest(
       MARKETPLACE_SEARCH_DOC_ID,
       variables,
     );
     try {
-      return parseSearchResponse(data);
+      const result = parseSearchResponse(data);
+
+      if (options.excludeIds?.size) {
+        result.listings = result.listings.filter(
+          (listing) => !options.excludeIds!.has(listing.id),
+        );
+      }
+      const maxResults = options.maxResults ?? params.limit;
+      if (maxResults > 0 && result.listings.length > maxResults) {
+        result.listings = result.listings.slice(0, maxResults);
+        result.hasNextPage = true;
+      }
+
+      for (const listing of result.listings) {
+        if (!listing.needsHydration) continue;
+        try {
+          const detail = await this.fetchListingPage(listing.id);
+          listing.title = detail.title;
+          listing.price = detail.price || "N/A";
+          listing.location = detail.location || "Unknown";
+          listing.imageUrl = detail.imageUrl;
+          listing.sellerName = detail.sellerName || "Unknown";
+          listing.postedDate = detail.postedDate;
+          listing.isPending = detail.isPending;
+          delete listing.needsHydration;
+        } catch {
+          // Keep the explicit hydration marker: the ID/URL remain useful and
+          // callers can distinguish a partial result from a fully parsed one.
+        }
+      }
+
+      return result;
     } catch (error) {
+      if (error instanceof MarketplaceRequestError) throw error;
       throw new MarketplaceRequestError(
         "Failed to parse Marketplace search response",
         {
@@ -355,8 +439,14 @@ export class FacebookClient {
     }
 
     // Fallback: fetch the listing page directly and parse embedded data
+    return this.fetchListingPage(listingId);
+  }
+
+  private async fetchListingPage(
+    listingId: string,
+  ): Promise<MarketplaceListingDetail> {
     const session = await this.ensureSession();
-    await this.rateLimiter.wait();
+    await this.pageRateLimiter.wait();
 
     const url = `https://www.facebook.com/marketplace/item/${listingId}/`;
     const request = {
@@ -416,16 +506,55 @@ export class FacebookClient {
     const data = await this.graphqlRequest(LOCATION_SEARCH_DOC_ID, variables);
 
     try {
-      const results =
-        (data as any)?.data?.city_street_search?.street_results?.edges ?? [];
-      return results.map((edge: any) => ({
-        name:
-          edge.node?.single_line_address ?? edge.node?.subtitle ?? "Unknown",
-        latitude: edge.node?.location?.latitude ?? 0,
-        longitude: edge.node?.location?.longitude ?? 0,
-      }));
-    } catch {
-      return [];
+      if (!isRecord(data) || !isRecord(data.data)) {
+        throw new Error("Marketplace location response is missing data");
+      }
+      const citySearch = data.data.city_street_search;
+      if (!isRecord(citySearch) || !isRecord(citySearch.street_results)) {
+        throw new Error("Marketplace location response is missing street results");
+      }
+      const edges = citySearch.street_results.edges;
+      if (!Array.isArray(edges)) {
+        throw new Error("Marketplace location response has invalid edges");
+      }
+
+      const locations = edges.flatMap((edge) => {
+        if (!isRecord(edge) || !isRecord(edge.node)) return [];
+        const location = edge.node.location;
+        if (!isRecord(location)) return [];
+        const latitude = location.latitude;
+        const longitude = location.longitude;
+        if (
+          typeof latitude !== "number" ||
+          !Number.isFinite(latitude) ||
+          typeof longitude !== "number" ||
+          !Number.isFinite(longitude)
+        ) {
+          return [];
+        }
+        const name =
+          typeof edge.node.single_line_address === "string"
+            ? edge.node.single_line_address
+            : typeof edge.node.subtitle === "string"
+              ? edge.node.subtitle
+              : "Unknown";
+        return [{ name, latitude, longitude }];
+      });
+      if (edges.length > 0 && locations.length === 0) {
+        throw new Error("Marketplace location response contains no usable locations");
+      }
+      return locations;
+    } catch (error) {
+      throw new MarketplaceRequestError(
+        "Failed to parse Marketplace location response",
+        {
+          operation: "graphql",
+          method: "POST",
+          path: "/api/graphql/",
+          docId: LOCATION_SEARCH_DOC_ID,
+        },
+        { cause: error },
+      );
     }
   }
 

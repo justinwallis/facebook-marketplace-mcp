@@ -25,7 +25,8 @@ export function createCreateMonitorHandler(store: MonitorStore) {
         minPrice: args.min_price,
         maxPrice: args.max_price,
         category: args.category,
-        limit: 24,
+        limit: 72,
+        maxPages: 3,
       });
       const output = { monitor: monitorOutput(monitor) };
       return responseFor(

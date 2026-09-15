@@ -24,6 +24,7 @@ test("listing-search options validate with readable defaults", () => {
   assert.equal(parsed.sort_by, "suggested");
   assert.equal(parsed.delivery_method, "all");
   assert.equal(parsed.date_listed, "all");
+  assert.equal(parsed.max_pages, 1);
   assert.throws(() =>
     searchListingsInput.parse({ ...requiredSearch, sort_by: "best_match" }),
   );
@@ -33,6 +34,8 @@ test("listing-search options validate with readable defaults", () => {
   assert.throws(() =>
     searchListingsInput.parse({ ...requiredSearch, date_listed: "today" }),
   );
+  assert.throws(() => searchListingsInput.parse({ ...requiredSearch, max_pages: 0 }));
+  assert.throws(() => searchListingsInput.parse({ ...requiredSearch, max_pages: 11 }));
 });
 
 test("listing-search handler forwards the new options to Marketplace", async () => {
@@ -55,12 +58,14 @@ test("listing-search handler forwards the new options to Marketplace", async () 
     sort_by: "price_high_to_low",
     delivery_method: "shipping",
     date_listed: "last_24_hours",
+    max_pages: 3,
   });
   await createSearchListingsHandler(service)(args);
 
   assert.equal(received?.sortBy, "price_high_to_low");
   assert.equal(received?.deliveryMethod, "shipping");
   assert.equal(received?.dateListed, "last_24_hours");
+  assert.equal(received?.maxPages, 3);
 });
 
 test("search variables reproduce captured sort and delivery mappings", () => {

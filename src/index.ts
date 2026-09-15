@@ -2,7 +2,6 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FacebookClient } from "./facebook/client.js";
-import { DEFAULT_FACEBOOK_SESSION_FILE } from "./facebook/auth.js";
 import {
   createCheckMonitorsHandler,
   createCreateMonitorHandler,
@@ -35,7 +34,11 @@ import { localMonitorStore } from "./mcp/monitor-store.js";
 
 const client = new FacebookClient({
   maxRequestsPerMinute: 3,
-  sessionFile: process.env.FACEBOOK_SESSION_FILE ?? DEFAULT_FACEBOOK_SESSION_FILE,
+  maxPageFetchesPerMinute: Number(
+    process.env.MAX_PAGE_FETCHES_PER_MINUTE ?? "30",
+  ),
+  sessionFile: process.env.FACEBOOK_SESSION_FILE,
+  chromeProfile: process.env.CHROME_PROFILE,
 });
 
 const monitorStore = localMonitorStore;

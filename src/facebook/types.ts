@@ -28,6 +28,7 @@ export interface MarketplaceListing {
   postedDate: string;
   url: string;
   isPending: boolean;
+  needsHydration?: boolean;
 }
 
 export interface MarketplaceListingDetail extends MarketplaceListing {
@@ -68,6 +69,7 @@ export interface SearchParams {
   dateListed?: DateListed;
   limit: number;
   cursor?: string;
+  maxPages?: number;
 }
 
 export interface SearchResult {

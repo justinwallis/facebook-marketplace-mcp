@@ -32,7 +32,9 @@ function findListingConnection(root: unknown): JsonRecord | null {
         if (!isRecord(edge) || !isRecord(edge.node)) return false;
         return (
           isRecord(edge.node.listing) ||
-          typeof edge.node.marketplace_listing_title === "string"
+          typeof edge.node.marketplace_listing_title === "string" ||
+          typeof edge.node.story_key === "string" ||
+          typeof edge.node.top_level_post_id === "string"
         );
       });
       if (hasListing) return current;
@@ -84,13 +86,18 @@ function parseSearchListing(edge: unknown): MarketplaceListing | null {
   if (!isRecord(edge) || !isRecord(edge.node)) return null;
   const listing = edge.node.listing ?? edge.node;
   if (!isRecord(listing)) return null;
+  const idValue =
+    listing.id ?? listing.story_key ?? listing.top_level_post_id;
   const id =
-    typeof listing.id === "string"
-      ? listing.id
-      : typeof listing.id === "number" && Number.isFinite(listing.id)
-        ? String(listing.id)
+    typeof idValue === "string"
+      ? idValue
+      : typeof idValue === "number" && Number.isFinite(idValue)
+        ? String(idValue)
         : "";
   if (!id.trim()) return null;
+  const needsHydration =
+    !isRecord(edge.node.listing) &&
+    typeof listing.marketplace_listing_title !== "string";
 
   const price = isRecord(listing.listing_price) ? listing.listing_price : {};
   const location = isRecord(listing.location) ? listing.location : {};
@@ -126,6 +133,7 @@ function parseSearchListing(edge: unknown): MarketplaceListing | null {
     postedDate: Number.isFinite(date.getTime()) ? date.toISOString() : "",
     url: `https://www.facebook.com/marketplace/item/${id}/`,
     isPending: listing.is_pending === true,
+    ...(needsHydration ? { needsHydration: true } : {}),
   };
 }
 

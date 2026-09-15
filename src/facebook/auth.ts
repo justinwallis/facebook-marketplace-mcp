@@ -20,6 +20,10 @@ const CHROME_SALT = "saltysalt";
 const CHROME_ITERATIONS = 1003;
 const CHROME_KEY_LENGTH = 16;
 const CHROME_IV = Buffer.alloc(16, " ");
+const CHROME_DIR = path.join(
+  os.homedir(),
+  "Library/Application Support/Google/Chrome",
+);
 const CHROME_EPOCH_OFFSET_SECONDS = 11_644_473_600;
 
 export const DEFAULT_FACEBOOK_SESSION_FILE = path.resolve(
@@ -143,13 +147,39 @@ function decryptCookieValue(encrypted: Buffer, key: Buffer): string {
   return decoded.toString("utf8");
 }
 
-function getCookieDbPath(profile = "Default"): string {
-  return path.join(
-    os.homedir(),
-    "Library/Application Support/Google/Chrome",
-    profile,
-    "Cookies",
+export function resolveChromeProfile(
+  profile: string,
+  chromeDir = CHROME_DIR,
+): string {
+  if (existsSync(path.join(chromeDir, profile, "Cookies"))) return profile;
+
+  let infoCache: Record<string, { name?: string }> = {};
+  try {
+    const localState = JSON.parse(
+      readFileSync(path.join(chromeDir, "Local State"), "utf8"),
+    );
+    infoCache = localState?.profile?.info_cache ?? {};
+  } catch {
+    throw new Error(
+      `Chrome profile "${profile}" was not found and Chrome Local State could not be read.`,
+    );
+  }
+
+  const wanted = profile.trim().toLowerCase();
+  for (const [directory, info] of Object.entries(infoCache)) {
+    if ((info?.name ?? "").trim().toLowerCase() === wanted) return directory;
+  }
+
+  const available = Object.entries(infoCache)
+    .map(([directory, info]) => `${directory} ("${info?.name ?? "?"}")`)
+    .join(", ");
+  throw new Error(
+    `Chrome profile "${profile}" not found. Available: ${available || "none"}.`,
   );
+}
+
+function getCookieDbPath(profile = "Default"): string {
+  return path.join(CHROME_DIR, resolveChromeProfile(profile), "Cookies");
 }
 
 export function extractChromeCookies(
@@ -288,9 +318,15 @@ export function saveFacebookCookiesToFile(
   }
 }
 
-interface StoredFacebookSession {
+export interface StoredFacebookSession {
   cookies: FacebookCookie[];
   userAgent: string;
+}
+
+export interface LoadedFacebookSession {
+  cookies: FacebookCookie[];
+  userAgent?: string;
+  source: "session-file" | "chrome";
 }
 
 function requireUserAgent(value: unknown): string {
@@ -381,6 +417,36 @@ export function loadFacebookSession(
     const message = error instanceof Error ? error.message : "Invalid session";
     throw new Error(`Could not load FACEBOOK_SESSION_FILE: ${message} Run npm run login.`);
   }
+}
+
+
+export function loadFacebookSessionFlexible(
+  options: {
+    sessionFile?: string;
+    defaultSessionFile?: string;
+    chromeProfile?: string;
+    cookieExtractor?: (domain: string, profile?: string) => FacebookCookie[];
+  } = {},
+): LoadedFacebookSession {
+  const defaultSessionFile =
+    options.defaultSessionFile ?? DEFAULT_FACEBOOK_SESSION_FILE;
+  const sessionFile = options.sessionFile ?? defaultSessionFile;
+
+  if (options.sessionFile || existsSync(sessionFile)) {
+    try {
+      const loaded = loadFacebookSessionFromFile(sessionFile);
+      return { ...loaded, source: "session-file" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid session";
+      throw new Error(`Could not load FACEBOOK_SESSION_FILE ${sessionFile}: ${message}`);
+    }
+  }
+
+  const extractor = options.cookieExtractor ?? extractChromeCookies;
+  const cookies = requireSessionCookies(
+    extractor("facebook.com", options.chromeProfile ?? "Default"),
+  );
+  return { cookies, userAgent: undefined, source: "chrome" };
 }
 
 export function cookiesToHeader(cookies: FacebookCookie[]): string {

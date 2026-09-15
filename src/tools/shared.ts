@@ -11,6 +11,7 @@ export function listingOutput(listing: MarketplaceListing) {
     posted_date: listing.postedDate,
     url: listing.url,
     is_pending: listing.isPending,
+    needs_hydration: listing.needsHydration === true,
   };
 }
 
@@ -39,7 +40,7 @@ export function listingsMarkdown(
   if (listings.length === 0) return `No listings found for "${query}".`;
   const rows = listings.map(
     (listing, index) =>
-      `${index + 1}. **${listing.title}** — ${listing.price}\n   📍 ${listing.location} | 👤 ${listing.seller_name}${listing.is_pending ? " ⏳ PENDING" : ""}\n   🔗 ${listing.url}`,
+      `${index + 1}. **${listing.title}** — ${listing.price}\n   📍 ${listing.location} | 👤 ${listing.seller_name}${listing.is_pending ? " ⏳ PENDING" : ""}${listing.needs_hydration ? " | hydration pending" : ""}\n   🔗 ${listing.url}`,
   );
   return `# Marketplace listings for "${query}"\n\n${rows.join("\n\n")}${hasMore ? "\n\n_More results are available with the returned cursor._" : ""}`;
 }

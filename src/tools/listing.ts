@@ -25,6 +25,7 @@ export function createSearchListingsHandler(service: MarketplaceService) {
         dateListed: args.date_listed,
         limit: args.limit,
         cursor: args.cursor,
+        maxPages: args.max_pages,
       });
       const bounded = takeWithinCharacterLimit(
         result.listings.map(listingOutput),

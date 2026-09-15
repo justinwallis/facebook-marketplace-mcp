@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -14,6 +15,8 @@ import {
   loadFacebookCookies,
   loadFacebookCookiesFromFile,
   saveFacebookCookiesToFile,
+  resolveChromeProfile,
+  loadFacebookSessionFlexible,
 } from "../src/facebook/auth.js";
 
 function withSessionFile(
@@ -127,4 +130,97 @@ test("reports invalid sessions without exposing cookie values", () => {
       return true;
     });
   });
+});
+
+
+test("resolves Chrome profile display names through Local State", () => {
+  const chromeDir = mkdtempSync(join(tmpdir(), "chrome-profile-test-"));
+  try {
+    mkdirSync(join(chromeDir, "Profile 7"), { recursive: true });
+    writeFileSync(join(chromeDir, "Profile 7", "Cookies"), "");
+    writeFileSync(
+      join(chromeDir, "Local State"),
+      JSON.stringify({
+        profile: { info_cache: { "Profile 7": { name: "Marketplace" } } },
+      }),
+    );
+
+    assert.equal(resolveChromeProfile("Profile 7", chromeDir), "Profile 7");
+    assert.equal(resolveChromeProfile("marketplace", chromeDir), "Profile 7");
+    assert.throws(
+      () => resolveChromeProfile("missing", chromeDir),
+      /Available: Profile 7/,
+    );
+  } finally {
+    rmSync(chromeDir, { recursive: true, force: true });
+  }
+});
+
+
+test("prefers a saved session but falls back to Chrome cookies when no snapshot exists", () => {
+  const directory = mkdtempSync(join(tmpdir(), "session-provider-test-"));
+  const defaultSessionFile = join(directory, "facebook-session.json");
+  const extracted = [
+    {
+      host: ".facebook.com",
+      name: "c_user",
+      value: "chrome-user",
+      path: "/",
+      expires: futureExpiry,
+      secure: true,
+      httpOnly: true,
+    },
+    {
+      host: ".facebook.com",
+      name: "xs",
+      value: "chrome-session",
+      path: "/",
+      expires: futureExpiry,
+      secure: true,
+      httpOnly: true,
+    },
+  ];
+  let chromeLoads = 0;
+  const cookieExtractor = () => {
+    chromeLoads++;
+    return extracted;
+  };
+
+  try {
+    const chrome = loadFacebookSessionFlexible({
+      defaultSessionFile,
+      chromeProfile: "Marketplace",
+      cookieExtractor,
+    });
+    assert.equal(chrome.source, "chrome");
+    assert.equal(chrome.userAgent, undefined);
+    assert.equal(chrome.cookies[0].value, "chrome-user");
+    assert.equal(chromeLoads, 1);
+
+    writeFileSync(
+      defaultSessionFile,
+      JSON.stringify({ version: 1, userAgent: "Browser/151", cookies: validCookies }),
+      { mode: 0o600 },
+    );
+    const saved = loadFacebookSessionFlexible({
+      defaultSessionFile,
+      cookieExtractor,
+    });
+    assert.equal(saved.source, "session-file");
+    assert.equal(saved.userAgent, "Browser/151");
+    assert.equal(chromeLoads, 1);
+
+    assert.throws(
+      () =>
+        loadFacebookSessionFlexible({
+          sessionFile: join(directory, "explicit-missing.json"),
+          defaultSessionFile,
+          cookieExtractor,
+        }),
+      /explicit-missing/,
+    );
+    assert.equal(chromeLoads, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

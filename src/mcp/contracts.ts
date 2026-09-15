@@ -23,6 +23,7 @@ const listingSchema = z.object({
   posted_date: z.string(),
   url: z.string(),
   is_pending: z.boolean(),
+  needs_hydration: z.boolean(),
 });
 
 const monitorSchema = z.object({
@@ -97,6 +98,13 @@ export const searchListingsInput = z
       .max(MAX_SEARCH_LIMIT)
       .default(DEFAULT_SEARCH_LIMIT)
       .describe("Maximum listings to return."),
+    max_pages: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .default(1)
+      .describe("Maximum GraphQL result pages to scan automatically."),
     cursor: z
       .string()
       .min(1)

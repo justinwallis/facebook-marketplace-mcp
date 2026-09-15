@@ -270,3 +270,202 @@ test("MCP reports parser failures with a diagnostic ID and preserves partial suc
     );
   }
 });
+
+test("enforces the requested limit before hydrating skeleton results", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls: string[] = [];
+  const searchBody = JSON.stringify({
+    data: {
+      marketplace_search: {
+        feed_units: {
+          edges: [
+            { node: { story_key: "listing-1" } },
+            { node: { story_key: "listing-2" } },
+          ],
+          page_info: { has_next_page: true, end_cursor: "next" },
+        },
+      },
+    },
+  });
+  const listingHtml =
+    '<script type="application/json">' +
+    JSON.stringify({
+      id: "listing-1",
+      marketplace_listing_title: "Hydrated desk",
+      listing_price: { formatted_amount: "$42" },
+      location_text: { text: "Boston" },
+    }) +
+    "</script>";
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    return new Response(
+      url.includes("/api/graphql/") ? searchBody : listingHtml,
+      { status: 200 },
+    );
+  };
+
+  const client = new FacebookClient({
+    maxRequestsPerMinute: 60_000,
+    maxPageFetchesPerMinute: 60_000,
+  } as ConstructorParameters<typeof FacebookClient>[0]);
+  client.ensureSession = async () => ({
+    cookies: [],
+    cookieHeader: "c_user=user; xs=session",
+    userId: "user",
+    fbDtsg: "token",
+    lsd: "lsd",
+    jazoest: "",
+    clientRevision: "1",
+  });
+
+  try {
+    const result = await client.searchListings({ ...params, limit: 1 });
+    assert.equal(result.listings.length, 1);
+    assert.equal(result.listings[0].id, "listing-1");
+    assert.equal(result.listings[0].title, "Hydrated desk");
+    assert.equal(result.listings[0].price, "$42");
+    assert.equal(result.listings[0].needsHydration, undefined);
+    assert.equal(result.hasNextPage, true);
+    assert.equal(calls.length, 2);
+    assert.match(calls[1], /marketplace\/item\/listing-1/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("traverses cursors up to maxPages and deduplicates listing IDs", async () => {
+  const previousFetch = globalThis.fetch;
+  const seenCursors: Array<string | undefined> = [];
+  globalThis.fetch = async (_input, init) => {
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    const variables = JSON.parse(body.get("variables") ?? "{}");
+    seenCursors.push(variables.cursor);
+    const secondPage = variables.cursor === "cursor-1";
+    const ids = secondPage ? ["listing-2", "listing-3"] : ["listing-1", "listing-2"];
+    return new Response(
+      JSON.stringify({
+        data: {
+          marketplace_search: {
+            feed_units: {
+              edges: ids.map((id) => ({
+                node: {
+                  listing: { id, marketplace_listing_title: id },
+                },
+              })),
+              page_info: secondPage
+                ? { has_next_page: false, end_cursor: null }
+                : { has_next_page: true, end_cursor: "cursor-1" },
+            },
+          },
+        },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const client = new FacebookClient({ maxRequestsPerMinute: 60_000 });
+  client.ensureSession = async () => ({
+    cookies: [], cookieHeader: "c_user=u; xs=x", userId: "u",
+    fbDtsg: "token", lsd: "lsd", jazoest: "", clientRevision: "1",
+  });
+
+  try {
+    const result = await client.searchListings({
+      ...params,
+      limit: 3,
+      maxPages: 2,
+    });
+    assert.deepEqual(result.listings.map((listing) => listing.id), [
+      "listing-1", "listing-2", "listing-3",
+    ]);
+    assert.deepEqual(seenCursors, [undefined, "cursor-1"]);
+    assert.equal(result.hasNextPage, false);
+    assert.equal(result.endCursor, null);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("hydrates only the remaining total-limit slots on later pages", async () => {
+  const previousFetch = globalThis.fetch;
+  let listingPageFetches = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.includes("/marketplace/item/")) {
+      listingPageFetches++;
+      const id = url.match(/item\/([^/]+)/)?.[1] ?? "missing";
+      return new Response(
+        '<script type="application/json">' +
+          JSON.stringify({ id, marketplace_listing_title: `Hydrated ${id}` }) +
+          "</script>",
+        { status: 200 },
+      );
+    }
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    const variables = JSON.parse(body.get("variables") ?? "{}");
+    const secondPage = variables.cursor === "cursor-1";
+    return new Response(
+      JSON.stringify({
+        data: {
+          marketplace_search: {
+            feed_units: {
+              edges: secondPage
+                ? [
+                    { node: { story_key: "listing-3" } },
+                    { node: { story_key: "listing-4" } },
+                  ]
+                : [
+                    { node: { listing: { id: "listing-1", marketplace_listing_title: "One" } } },
+                    { node: { listing: { id: "listing-2", marketplace_listing_title: "Two" } } },
+                  ],
+              page_info: secondPage
+                ? { has_next_page: false, end_cursor: null }
+                : { has_next_page: true, end_cursor: "cursor-1" },
+            },
+          },
+        },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const client = new FacebookClient({
+    maxRequestsPerMinute: 60_000,
+    maxPageFetchesPerMinute: 60_000,
+  });
+  client.ensureSession = async () => ({
+    cookies: [], cookieHeader: "c_user=u; xs=x", userId: "u",
+    fbDtsg: "token", lsd: "lsd", jazoest: "", clientRevision: "1",
+  });
+
+  try {
+    const result = await client.searchListings({ ...params, limit: 3, maxPages: 2 });
+    assert.deepEqual(result.listings.map((listing) => listing.id), [
+      "listing-1", "listing-2", "listing-3",
+    ]);
+    assert.equal(listingPageFetches, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("distinguishes an empty location result from malformed location data", async () => {
+  await withResponse(
+    JSON.stringify({
+      data: { city_street_search: { street_results: { edges: [] } } },
+    }),
+    async (client) => {
+      assert.deepEqual(await client.searchLocation("Nowhere"), []);
+    },
+  );
+
+  await withResponse(JSON.stringify({ data: {} }), async (client) => {
+    await assert.rejects(client.searchLocation("Boston"), (error: unknown) => {
+      assert.ok(error instanceof MarketplaceRequestError);
+      assert.equal(error.request.operation, "graphql");
+      return true;
+    });
+  });
+});
