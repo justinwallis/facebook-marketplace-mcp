@@ -4,14 +4,14 @@ An MCP server that provides access to Facebook Marketplace via direct GraphQL AP
 
 ## How It Works
 
-Facebook's web client makes all Marketplace requests as `POST /api/graphql/` with a `doc_id` (query hash) and `variables`. This server replays those requests using your existing Facebook session cookies from Chrome.
+Facebook's web client makes all Marketplace requests as `POST /api/graphql/` with a `doc_id` (query hash) and `variables`. This server replays those requests using either a saved interactive-login session or your existing Facebook session cookies from Chrome.
 
 **Think of it like [pypush](https://github.com/JJTech0130/pypush) for iMessage — direct protocol, no browser.**
 
 ## Prerequisites
 
-- **macOS** (cookie extraction uses Keychain)
-- **Google Chrome** with an active Facebook login or a Facebook cookie JSON file configured with `FACEBOOK_SESSION_FILE`
+- **macOS** for automatic Chrome-cookie fallback (interactive session files are portable)
+- **Google Chrome** for `npm run login` or automatic cookie extraction
 - **Node.js** 22+
 
 ## Installation
@@ -75,7 +75,9 @@ Search Marketplace by query, location, and filters.
 | `sort_by`         | string | no       | `suggested` (default), `distance`, `date_listed`, `price_low_to_high`, or `price_high_to_low` |
 | `delivery_method` | string | no       | `all` (default), `local_pickup`, or `shipping`                                                |
 | `date_listed`     | string | no       | `all` (default), `last_24_hours`, `last_7_days`, or `last_30_days`                            |
-| `limit`           | number | no       | Max results (default: 20)                                                                     |
+| `limit`           | number | no       | Max total results (default: 20)                                                               |
+| `max_pages`       | number | no       | GraphQL pages to scan automatically, 1–10 (default: 1)                                        |
+| `cursor`          | string | no       | Continue from a cursor returned by a prior search                                             |
 
 ### `facebook_marketplace_get_listing`
 
@@ -85,7 +87,7 @@ Get full details for a specific listing.
 | ------------ | ------ | -------- | ---------------------- |
 | `listing_id` | string | yes      | Marketplace listing ID |
 
-### `facebook_marketplace_search_location`
+### `facebook_marketplace_search_locations`
 
 Look up a city, neighborhood, or ZIP code to get coordinates for
 `search_listings`.
@@ -94,7 +96,7 @@ Look up a city, neighborhood, or ZIP code to get coordinates for
 | --------- | ------ | -------- | --------------------------------------------- |
 | `query`   | string | yes      | Location text, such as `Boston MA` or `02108` |
 
-### `facebook_marketplace_monitor_search`
+### `facebook_marketplace_create_monitor`
 
 Save a search as a monitor to track new listings over time.
 
@@ -128,10 +130,12 @@ Delete a saved monitor.
 
 | Env Variable               | Default                        | Description                                                 |
 | -------------------------- | ------------------------------ | ----------------------------------------------------------- |
-| `FACEBOOK_SESSION_FILE`    | `.local/facebook-session.json` | Login session snapshot path                                 |
-| `MCP_ERROR_LOG_PATH`       | `.local/mcp-errors.jsonl`      | Alternate path for sanitized failed-tool diagnostics        |
-| `MCP_CAPTURE_LISTING_HTML` | unset                          | Set to `1` to retain exact direct listing-page HTML locally |
-| `MCP_LISTING_CAPTURE_DIR`  | `.local/listing-page-captures` | Alternate directory for opted-in raw HTML captures          |
+| `FACEBOOK_SESSION_FILE`        | unset                          | Explicit login-session snapshot path; invalid explicit paths fail closed |
+| `CHROME_PROFILE`               | `Default`                      | Chrome profile directory or display name for cookie fallback |
+| `MAX_PAGE_FETCHES_PER_MINUTE`  | `30`                           | Separate budget for listing-page hydration requests          |
+| `MCP_ERROR_LOG_PATH`           | `.local/mcp-errors.jsonl`      | Alternate path for sanitized failed-tool diagnostics         |
+| `MCP_CAPTURE_LISTING_HTML`     | unset                          | Set to `1` to retain exact direct listing-page HTML locally  |
+| `MCP_LISTING_CAPTURE_DIR`      | `.local/listing-page-captures` | Alternate directory for opted-in raw HTML captures           |
 
 ### Failed-request diagnostics
 
@@ -160,12 +164,15 @@ shared. Set `MCP_LISTING_CAPTURE_DIR` to use another protected local directory;
 remove captures manually when they are no longer needed. A capture-write failure
 is reported only on stderr and does not alter the request result.
 
-### Cookie file authentication
+### Authentication precedence
 
-Run `npm run login` before starting the server. It saves Facebook cookies and
-Chrome's user agent to `.local/facebook-session.json`. Set `FACEBOOK_SESSION_FILE`
-to use another path. The server requires this login-generated session format,
-including its browser user agent; cookie-only exports are not supported.
+`npm run login` is the preferred setup. It saves normalized Facebook cookies and
+the exact browser user agent to `.local/facebook-session.json`. If
+`FACEBOOK_SESSION_FILE` is set, that file is used strictly and a missing or invalid
+file is an error. Otherwise the server uses `.local/facebook-session.json` when it
+exists; if it does not, macOS falls back to extracting the active Chrome profile's
+Facebook cookies. `CHROME_PROFILE` accepts either an on-disk name such as
+`Profile 2` or Chrome's visible profile name.
 
 ### Interactive login
 
@@ -218,11 +225,18 @@ npm run inspector
 
 ## Rate Limiting
 
-The server self-rate-limits to 3 requests/minute with random jitter to avoid detection. This means searches take a few seconds.
+GraphQL traffic is self-rate-limited to 3 requests/minute with random jitter. Listing-page hydration has a separate 30 requests/minute budget, configurable with `MAX_PAGE_FETCHES_PER_MINUTE`. If a search operation degrades to ID-only `story_key` nodes, the server preserves them and hydrates only the listings that will actually be returned.
+
+## Coverage and fallback behavior
+
+- `max_pages` performs bounded cursor traversal, deduplicates listing IDs, and stops at the requested total `limit`, page bound, or Facebook end-of-results.
+- New monitors scan up to 3 pages / 72 unique listings per check instead of only the first page.
+- `needs_hydration` in MCP listing output is `true` only when Facebook returned an ID-only result and the listing-page fallback could not fill its fields.
+- Facebook can ignore a small requested `count` and return a larger fixed page. The client enforces `limit` before expensive hydration. If you manually request a very small single page and then follow Facebook's raw cursor, items trimmed from that server page are not recoverable from that cursor; prefer a larger `limit` with `max_pages` for complete scans.
 
 ## Limitations
 
-- **macOS only** for automatic cookie extraction
+- **macOS only** for automatic Chrome-cookie extraction
 - **Requires Chrome** with active Facebook session
 - **Facebook ToS** — automating Facebook violates their Terms of Service
 - **Fragile** — `doc_id` values change on Facebook deploys
