@@ -1,5 +1,6 @@
 import type { z } from "zod/v4";
 import { responseFor, takeWithinCharacterLimit } from "../mcp/response.js";
+import { CHARACTER_LIMIT } from "../mcp/constants.js";
 import type {
   MarketplaceService,
   MonitorStore,
@@ -63,17 +64,18 @@ export function createCheckMonitorsHandler(
       }> = [];
       for (const monitor of monitors) {
         const search = await service.searchListings(monitor.params);
-        const newListings = search.listings.filter(
+        const unseenListings = search.listings.filter(
           (listing) => !monitor.seenIds.includes(listing.id),
         );
+        const isBaseline = monitor.lastChecked === null && monitor.seenIds.length === 0;
         store.updateSeenIds(
           monitor.name,
-          newListings.map((listing) => listing.id),
+          unseenListings.map((listing) => listing.id),
         );
         results.push({
           name: monitor.name,
           found: true,
-          new_listings: newListings.map(listingOutput),
+          new_listings: isBaseline ? [] : unseenListings.map(listingOutput),
         });
       }
       if (args.monitor_name && results.length === 0)
@@ -82,20 +84,39 @@ export function createCheckMonitorsHandler(
           found: false,
           new_listings: [],
         });
-      const bounded = takeWithinCharacterLimit(results, (result) =>
-        JSON.stringify(result),
-      );
-      const output = {
-        count: bounded.items.length,
-        results: bounded.items,
-        truncated: bounded.truncated,
-        ...(bounded.truncated
+      const outputResults = results.map((result) => ({
+        ...result,
+        new_listings: [...result.new_listings],
+      }));
+      let truncated = false;
+      const makeOutput = () => ({
+        count: outputResults.length,
+        results: outputResults,
+        truncated,
+        ...(truncated
           ? {
               truncation_message:
-                "Response truncated. Check one monitor at a time.",
+                "Response truncated. All discovered listing IDs were still recorded as seen.",
             }
           : {}),
-      };
+      });
+      while (JSON.stringify(makeOutput(), null, 2).length > CHARACTER_LIMIT) {
+        const resultWithListings = [...outputResults]
+          .reverse()
+          .find((result) => result.new_listings.length > 0);
+        if (resultWithListings) {
+          resultWithListings.new_listings.pop();
+          truncated = true;
+          continue;
+        }
+        if (outputResults.length > 1) {
+          outputResults.pop();
+          truncated = true;
+          continue;
+        }
+        break;
+      }
+      const output = makeOutput();
       const markdown = output.results.length
         ? output.results
             .map((result) =>

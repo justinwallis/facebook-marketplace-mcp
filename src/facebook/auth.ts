@@ -67,7 +67,10 @@ function getExpiry(entry: CookieFileEntry): number {
   return raw;
 }
 
-function requireSessionCookies(cookies: FacebookCookie[]): FacebookCookie[] {
+function requireSessionCookies(
+  cookies: FacebookCookie[],
+  source = "session file",
+): FacebookCookie[] {
   const nowInSeconds = Date.now() / 1000;
   const activeCookies = cookies.filter(
     (cookie) => cookie.expires === 0 || cookie.expires > nowInSeconds,
@@ -75,7 +78,7 @@ function requireSessionCookies(cookies: FacebookCookie[]): FacebookCookie[] {
 
   for (const name of ["c_user", "xs"]) {
     if (!getCookieValue(activeCookies, name)) {
-      throw new Error(`session file has no active ${name} cookie`);
+      throw new Error(`${source} has no active ${name} cookie`);
     }
   }
 
@@ -443,8 +446,10 @@ export function loadFacebookSessionFlexible(
   }
 
   const extractor = options.cookieExtractor ?? extractChromeCookies;
+  const chromeProfile = options.chromeProfile ?? "Default";
   const cookies = requireSessionCookies(
-    extractor("facebook.com", options.chromeProfile ?? "Default"),
+    extractor("facebook.com", chromeProfile),
+    `Chrome profile "${chromeProfile}"`,
   );
   return { cookies, userAgent: undefined, source: "chrome" };
 }

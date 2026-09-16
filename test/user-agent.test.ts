@@ -80,3 +80,30 @@ test("rejects legacy sessions and invalid user agents before making requests", a
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("session bootstrap uses the page-fetch budget, not the GraphQL budget", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "facebook-bootstrap-limit-"));
+  const sessionFile = join(directory, "session.json");
+  const previousFetch = globalThis.fetch;
+  writeFileSync(
+    sessionFile,
+    JSON.stringify({ version: 1, cookies, userAgent: "Browser/150.0" }),
+  );
+  globalThis.fetch = async () =>
+    new Response('"dtsg":{"token":"test-token"}');
+  try {
+    const client = new FacebookClient({ sessionFile });
+    let graphqlWaits = 0;
+    let pageWaits = 0;
+    (client as any).rateLimiter = { wait: async () => { graphqlWaits++; } };
+    (client as any).pageRateLimiter = { wait: async () => { pageWaits++; } };
+
+    await client.initSession();
+
+    assert.equal(graphqlWaits, 0);
+    assert.equal(pageWaits, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

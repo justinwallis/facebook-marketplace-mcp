@@ -114,6 +114,52 @@ test("accepts valid JSON and Facebook's anti-JSONP prefix without logging warnin
   }
 });
 
+test("accepts newline-delimited deferred GraphQL payloads", async () => {
+  const body = [
+    JSON.stringify({ data: validData, errors: [] }),
+    JSON.stringify({
+      label: "VideoPlayerRelay_video$defer$InstreamVideoAdBreaksPlayer_video",
+      path: [
+        "marketplace_search",
+        "feed_units",
+        "edges",
+        0,
+        "node",
+        "story",
+      ],
+      data: { id: "deferred-video-fragment" },
+      extensions: { is_final: true },
+    }),
+  ].join("\n");
+
+  await withResponse(body, async (client, logPath) => {
+    const result = await client.searchListings(params);
+    assert.equal(result.listings[0].id, "listing-1");
+    assert.equal(result.hasNextPage, true);
+    await assert.rejects(readFile(logPath), { code: "ENOENT" });
+  });
+});
+
+test("aggregates provider errors from deferred GraphQL payloads", async () => {
+  const body = [
+    JSON.stringify({ data: validData }),
+    JSON.stringify({
+      label: "DeferredFragment",
+      path: ["marketplace_search", "feed_units", "edges", 0],
+      data: { id: "deferred-fragment" },
+      errors: [{ code: 987, message: "private-deferred-message" }],
+    }),
+  ].join("\n");
+
+  await withResponse(body, async (client, logPath) => {
+    const result = await client.searchListings(params);
+    assert.equal(result.listings[0].id, "listing-1");
+    const warning = JSON.parse(await readFile(logPath, "utf8"));
+    assert.equal(warning.errorCount, 1);
+    assert.deepEqual(warning.codes, [987]);
+  });
+});
+
 test("logs only safe summaries of provider errors while retaining partial listing data", async () => {
   const body = JSON.stringify({
     data: validData,

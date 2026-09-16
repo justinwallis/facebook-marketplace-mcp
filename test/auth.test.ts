@@ -220,6 +220,21 @@ test("prefers a saved session but falls back to Chrome cookies when no snapshot 
       /explicit-missing/,
     );
     assert.equal(chromeLoads, 1);
+
+    assert.throws(
+      () =>
+        loadFacebookSessionFlexible({
+          defaultSessionFile: join(directory, "missing-default.json"),
+          chromeProfile: "Marketplace",
+          cookieExtractor: () => [],
+        }),
+      (error: Error) => {
+        assert.match(error.message, /Chrome profile/i);
+        assert.match(error.message, /c_user/);
+        assert.doesNotMatch(error.message, /session file/i);
+        return true;
+      },
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

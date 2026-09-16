@@ -63,6 +63,24 @@ function graphqlErrorSummary(response: Record<string, unknown>) {
   return { errorCount: errors.length, codes };
 }
 
+function stripFacebookJsonPrefix(text: string): string {
+  return text.replace(/^\s*for\s*\(;;\);\s*/, "");
+}
+
+function parseGraphqlPayloads(text: string): unknown[] {
+  const stripped = stripFacebookJsonPrefix(text);
+  try {
+    return [JSON.parse(stripped)];
+  } catch (singleError) {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length <= 1) throw singleError;
+    return lines.map((line) => JSON.parse(stripFacebookJsonPrefix(line)));
+  }
+}
+
 const BROWSER_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
   "sec-fetch-dest": "document",
@@ -159,7 +177,7 @@ export class FacebookClient {
     jazoest: string;
     clientRevision: string;
   }> {
-    await this.rateLimiter.wait();
+    await this.pageRateLimiter.wait();
 
     const request = {
       operation: "marketplace-bootstrap" as const,
@@ -298,23 +316,29 @@ export class FacebookClient {
       status: res.status,
       responseBytes: Buffer.byteLength(text, "utf8"),
     };
-    let data: unknown;
+    let payloads: unknown[];
     try {
-      // Strip only Facebook's anti-JSONP prefix, not arbitrary non-JSON content.
-      data = JSON.parse(text.replace(/^\s*for\s*\(;;\);\s*/, ""));
+      payloads = parseGraphqlPayloads(text);
     } catch {
       throw new MarketplaceRequestError(
         "Failed to parse GraphQL response",
         context,
       );
     }
+    const data = payloads[0];
     if (!isRecord(data)) {
       throw new MarketplaceRequestError(
         "Invalid GraphQL response envelope",
         context,
       );
     }
-    const summary = graphqlErrorSummary(data);
+    const summaries = payloads
+      .filter(isRecord)
+      .map((payload) => graphqlErrorSummary(payload));
+    const summary = {
+      errorCount: summaries.reduce((total, item) => total + item.errorCount, 0),
+      codes: summaries.flatMap((item) => item.codes),
+    };
     if (summary.errorCount > 0) {
       await recordGraphqlWarning(context, summary);
     }

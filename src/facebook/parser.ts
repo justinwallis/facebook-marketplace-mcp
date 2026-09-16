@@ -17,6 +17,14 @@ function textValue(value: unknown): string {
   return "";
 }
 
+function isMarketplaceAdStory(value: JsonRecord): boolean {
+  return (
+    value.__typename === "MarketplaceFeedAdStory" ||
+    typeof value.ad_id_string === "string" ||
+    textValue(value.id).includes("EntMarketplaceFeedAdStory")
+  );
+}
+
 function findListingConnection(root: unknown): JsonRecord | null {
   const seen = new Set<object>();
   const queue: unknown[] = [root];
@@ -30,6 +38,7 @@ function findListingConnection(root: unknown): JsonRecord | null {
     if (isRecord(current) && Array.isArray(current.edges)) {
       const hasListing = current.edges.some((edge) => {
         if (!isRecord(edge) || !isRecord(edge.node)) return false;
+        if (isMarketplaceAdStory(edge.node)) return false;
         return (
           isRecord(edge.node.listing) ||
           typeof edge.node.marketplace_listing_title === "string" ||
@@ -84,6 +93,7 @@ export function parseSearchResponse(data: unknown): SearchResult {
 
 function parseSearchListing(edge: unknown): MarketplaceListing | null {
   if (!isRecord(edge) || !isRecord(edge.node)) return null;
+  if (isMarketplaceAdStory(edge.node)) return null;
   const listing = edge.node.listing ?? edge.node;
   if (!isRecord(listing)) return null;
   const idValue =

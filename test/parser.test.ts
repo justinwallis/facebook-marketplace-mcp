@@ -331,3 +331,28 @@ test("preserves skeleton Marketplace feed units as hydration stubs", () => {
   assert.equal(result.hasNextPage, true);
   assert.equal(result.endCursor, "next-stub");
 });
+
+test("ignores sponsored Marketplace ad stories during skeleton fallback", () => {
+  const result = parseSearchResponse({
+    data: {
+      marketplace_search: {
+        feed_units: {
+          edges: [
+            { node: { story_key: "123456789", tracking: "listing" } },
+            {
+              node: {
+                __typename: "MarketplaceFeedAdStory",
+                story_key: "-8710787980393491714",
+                ad_id_string: "120245979964740741",
+                id: "120245979964740741:IN_MEMORY_MARKETPLACE_FEED_STORY_ENT:EntMarketplaceFeedAdStory:161547245",
+              },
+            },
+          ],
+          page_info: { has_next_page: false, end_cursor: null },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(result.listings.map((listing) => listing.id), ["123456789"]);
+});

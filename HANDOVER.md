@@ -14,6 +14,15 @@ This branch starts from PR #4 head `0e1a4697af4f8272ac3be2e32199689cecdd3562` (`
 - New monitors default to three pages / 72 listings per check.
 - MCP output exposes `needs_hydration` so partial ID-only fallback results are explicit.
 
+
+## Live E2E verification (2026-09-16)
+- Authenticated login/session snapshot, location lookup, listing search, listing detail, two-/three-page pagination, and monitor persistence were exercised against live Facebook through the built MCP server.
+- Added support for newline-delimited GraphQL `@defer` payloads observed on cursor pages.
+- Marketplace bootstrap now uses the page-fetch limiter so three-page monitor checks do not hit the MCP 60-second timeout.
+- Sponsored `MarketplaceFeedAdStory` nodes are excluded from degraded `story_key` fallback results.
+- First monitor check now establishes a baseline instead of reporting all current inventory as new; large monitor responses are bounded while all discovered IDs are still persisted as seen.
+- Chrome fallback auth errors now identify the Chrome profile instead of incorrectly referring to a session file.
+
 ## Known limitations
 - Facebook may return more rows than requested. The client trims before hydration. A raw Facebook cursor cannot recover rows trimmed from the same server page; use a sufficiently large `limit` plus `max_pages` for scans.
 - `LISTING_DETAIL_DOC_ID`, if configured later, still needs a dedicated normalized GraphQL detail parser; the current default detail path uses structured Relay JSON from the listing page.
