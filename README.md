@@ -2,6 +2,8 @@
 
 An MCP server that provides access to Facebook Marketplace via direct GraphQL API calls. No browser automation at runtime — speaks Facebook's internal protocol directly.
 
+This consolidated fork keeps the server **read-only toward Facebook** while adding safer local session handling, bounded native listing-image inspection, and richer saved-monitor filters intended for low-frequency deal watching. See [docs/marketplace-watch.md](docs/marketplace-watch.md) for a scheduler-agnostic watcher pattern and [FORK_NOTES.md](FORK_NOTES.md) for provenance and design choices.
+
 ## How It Works
 
 Facebook's web client makes all Marketplace requests as `POST /api/graphql/` with a `doc_id` (query hash) and `variables`. This server replays those requests using either a saved interactive-login session or your existing Facebook session cookies from Chrome.
@@ -87,6 +89,16 @@ Get full details for a specific listing.
 | ------------ | ------ | -------- | ---------------------- |
 | `listing_id` | string | yes      | Marketplace listing ID |
 
+### `facebook_marketplace_get_listing_images`
+
+Return selected listing photos as native MCP image content for visual inspection. The tool accepts only HTTPS Facebook CDN image URLs, caps each image at 10 MB, allows at most 10 requested images, and does not follow redirects.
+
+| Parameter       | Type     | Required | Description                                      |
+| --------------- | -------- | -------- | ------------------------------------------------ |
+| `listing_id`    | string   | yes      | Marketplace listing ID                           |
+| `image_numbers` | number[] | no       | Specific 1-based photo numbers, maximum 10       |
+| `max_images`    | number   | no       | First N photos when image_numbers is omitted (4) |
+
 ### `facebook_marketplace_search_locations`
 
 Look up a city, neighborhood, or ZIP code to get coordinates for
@@ -100,15 +112,21 @@ Look up a city, neighborhood, or ZIP code to get coordinates for
 
 Save a search as a monitor to track new listings over time.
 
-| Parameter   | Type   | Required | Description          |
-| ----------- | ------ | -------- | -------------------- |
-| `name`      | string | yes      | Monitor name         |
-| `query`     | string | yes      | Search term          |
-| `latitude`  | number | yes      | Search center lat    |
-| `longitude` | number | yes      | Search center lng    |
-| `radius_km` | number | no       | Radius (default: 50) |
-| `min_price` | number | no       | Min price            |
-| `max_price` | number | no       | Max price            |
+| Parameter         | Type   | Required | Description                                                        |
+| ----------------- | ------ | -------- | ------------------------------------------------------------------ |
+| `name`            | string | yes      | Monitor name                                                       |
+| `query`           | string | yes      | Search term                                                        |
+| `latitude`        | number | yes      | Search center latitude                                             |
+| `longitude`       | number | yes      | Search center longitude                                            |
+| `radius_km`       | number | no       | Radius (default: 50)                                               |
+| `min_price`       | number | no       | Minimum price                                                      |
+| `max_price`       | number | no       | Maximum price                                                      |
+| `category`        | string | no       | Marketplace category ID                                            |
+| `sort_by`         | string | no       | Search sort used on each check (default: suggested)                |
+| `delivery_method` | string | no       | all, local_pickup, or shipping (default: all)                      |
+| `date_listed`     | string | no       | all, last_24_hours, last_7_days, or last_30_days                   |
+| `limit`           | number | no       | Maximum unique listings inspected per check (default: 72)          |
+| `max_pages`       | number | no       | Marketplace pages scanned per check, 1–10 (default: 3)             |
 
 ### `facebook_marketplace_check_monitors`
 
@@ -233,6 +251,12 @@ GraphQL traffic is self-rate-limited to 3 requests/minute with random jitter. Li
 - New monitors scan up to 3 pages / 72 unique listings per check instead of only the first page.
 - `needs_hydration` in MCP listing output is `true` only when Facebook returned an ID-only result and the listing-page fallback could not fill its fields.
 - Facebook can ignore a small requested `count` and return a larger fixed page. The client enforces `limit` before expensive hydration. If you manually request a very small single page and then follow Facebook's raw cursor, items trimmed from that server page are not recoverable from that cursor; prefer a larger `limit` with `max_pages` for complete scans.
+
+## Deal-watcher pattern
+
+The MCP does not schedule itself. A persistent scheduler or agent should call `facebook_marketplace_check_monitors` at a modest cadence, triage only the newly returned listings, and optionally call `facebook_marketplace_get_listing` / `facebook_marketplace_get_listing_images` for promising or poorly described results.
+
+The first monitor check establishes a baseline and returns no "new" inventory. This avoids a notification storm when a watch is created. See [docs/marketplace-watch.md](docs/marketplace-watch.md) for the recommended flow. A reusable agent playbook is also included at [skills/marketplace-watch/SKILL.md](skills/marketplace-watch/SKILL.md).
 
 ## Limitations
 

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -154,7 +155,21 @@ export function resolveChromeProfile(
   profile: string,
   chromeDir = CHROME_DIR,
 ): string {
-  if (existsSync(path.join(chromeDir, profile, "Cookies"))) return profile;
+  const normalizedProfile = profile.trim();
+  if (
+    !normalizedProfile ||
+    normalizedProfile === "." ||
+    normalizedProfile === ".." ||
+    normalizedProfile.includes("/") ||
+    normalizedProfile.includes("\\") ||
+    path.isAbsolute(normalizedProfile)
+  ) {
+    throw new Error("Invalid Chrome profile name.");
+  }
+
+  if (existsSync(path.join(chromeDir, normalizedProfile, "Cookies"))) {
+    return normalizedProfile;
+  }
 
   let infoCache: Record<string, { name?: string }> = {};
   try {
@@ -168,7 +183,7 @@ export function resolveChromeProfile(
     );
   }
 
-  const wanted = profile.trim().toLowerCase();
+  const wanted = normalizedProfile.toLowerCase();
   for (const [directory, info] of Object.entries(infoCache)) {
     if ((info?.name ?? "").trim().toLowerCase() === wanted) return directory;
   }
@@ -191,13 +206,18 @@ export function extractChromeCookies(
 ): FacebookCookie[] {
   const cookiePath = getCookieDbPath(profile);
 
-  // Chrome locks the DB while running — copy it first
-  const tmpPath = path.join(os.tmpdir(), `chrome_cookies_${Date.now()}`);
+  // Chrome locks the DB while running. Copy it into a private temporary
+  // directory without invoking a shell so profile names cannot become commands.
+  const tmpDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "facebook-marketplace-cookies-"),
+  );
+  const tmpPath = path.join(tmpDirectory, "Cookies");
   try {
-    execSync(`cp "${cookiePath}" "${tmpPath}"`, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    chmodSync(tmpDirectory, 0o700);
+    copyFileSync(cookiePath, tmpPath);
+    chmodSync(tmpPath, 0o600);
   } catch {
+    rmSync(tmpDirectory, { recursive: true, force: true });
     throw new Error(
       `Failed to copy Chrome cookie DB from ${cookiePath}. ` +
         "Make sure Chrome is installed and the profile exists.",
@@ -211,6 +231,7 @@ export function extractChromeCookies(
   try {
     db = new Database(tmpPath, { readonly: true });
   } catch {
+    rmSync(tmpDirectory, { recursive: true, force: true });
     throw new Error(`Failed to open cookie database at ${tmpPath}`);
   }
 
@@ -250,11 +271,7 @@ export function extractChromeCookies(
     });
   } finally {
     db.close();
-    try {
-      execSync(`rm -f "${tmpPath}"`, { stdio: ["pipe", "pipe", "pipe"] });
-    } catch {
-      // cleanup failure is non-fatal
-    }
+    rmSync(tmpDirectory, { recursive: true, force: true });
   }
 }
 
@@ -454,14 +471,25 @@ export function loadFacebookSessionFlexible(
   return { cookies, userAgent: undefined, source: "chrome" };
 }
 
+function isSafeCookieName(name: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+}
+
+function sanitizeCookieValue(value: string): string | null {
+  const latin1 = value.replace(/[^\x00-\xFF]/g, "");
+  if (/[\x00-\x1F\x7F;]/.test(latin1)) return null;
+  return latin1;
+}
+
 export function cookiesToHeader(cookies: FacebookCookie[]): string {
-  return cookies
-    .map((c) => {
-      // Strip non-Latin1 chars — fetch rejects them in Cookie headers
-      const safe = c.value.replace(/[^\x00-\xFF]/g, "");
-      return `${c.name}=${safe}`;
-    })
-    .join("; ");
+  const parts: string[] = [];
+  for (const cookie of cookies) {
+    if (!isSafeCookieName(cookie.name)) continue;
+    const value = sanitizeCookieValue(cookie.value);
+    if (value === null) continue;
+    parts.push(`${cookie.name}=${value}`);
+  }
+  return parts.join("; ");
 }
 
 export function getCookieValue(

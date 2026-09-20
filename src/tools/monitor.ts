@@ -26,14 +26,17 @@ export function createCreateMonitorHandler(store: MonitorStore) {
         minPrice: args.min_price,
         maxPrice: args.max_price,
         category: args.category,
-        limit: 72,
-        maxPages: 3,
+        sortBy: args.sort_by ?? "suggested",
+        deliveryMethod: args.delivery_method ?? "all",
+        dateListed: args.date_listed ?? "all",
+        limit: args.limit ?? 72,
+        maxPages: args.max_pages ?? 3,
       });
       const output = { monitor: monitorOutput(monitor) };
       return responseFor(
         output,
         args.response_format,
-        `# Monitor saved\n\n**${monitor.name}** searches for "${monitor.params.query}" within ${monitor.params.radiusKm} km.`,
+        `# Monitor saved\n\n**${monitor.name}** searches for "${monitor.params.query}" within ${monitor.params.radiusKm} km using ${monitor.params.deliveryMethod ?? "all"} delivery and up to ${monitor.params.maxPages ?? 1} page(s) per check.`,
       );
     } catch (error) {
       return toolErrorResponse(
