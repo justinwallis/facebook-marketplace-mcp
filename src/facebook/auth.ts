@@ -471,12 +471,12 @@ export function loadFacebookSessionFlexible(
 }
 
 function isSafeCookieName(name: string): boolean {
-  return /^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$/.test(name);
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
 }
 
 function sanitizeCookieValue(value: string): string | null {
-  const latin1 = value.replace(/[^\\x00-\\xFF]/g, "");
-  if (/[\\x00-\\x1F\\x7F;]/.test(latin1)) return null;
+  const latin1 = value.replace(/[^\x00-\xFF]/g, "");
+  if (/[\x00-\x1F\x7F;]/.test(latin1)) return null;
   return latin1;
 }
 
