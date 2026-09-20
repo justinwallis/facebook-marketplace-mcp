@@ -231,6 +231,7 @@ export function extractChromeCookies(
   try {
     db = new Database(tmpPath, { readonly: true });
   } catch {
+    rmSync(tmpDirectory, { recursive: true, force: true });
     throw new Error(`Failed to open cookie database at ${tmpPath}`);
   }
 
