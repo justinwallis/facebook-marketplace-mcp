@@ -86,6 +86,7 @@ test("publishes the modern prefixed tool contract with annotations and schemas",
       [
         "facebook_marketplace_search_listings",
         "facebook_marketplace_get_listing",
+        "facebook_marketplace_get_listing_images",
         "facebook_marketplace_search_locations",
         "facebook_marketplace_create_monitor",
         "facebook_marketplace_check_monitors",
@@ -140,6 +141,31 @@ test("publishes the modern prefixed tool contract with annotations and schemas",
       "latitude",
       "longitude",
     ]);
+    assert.deepEqual(Object.keys(monitor.inputSchema.properties ?? {}), [
+      "name",
+      "query",
+      "latitude",
+      "longitude",
+      "radius_km",
+      "min_price",
+      "max_price",
+      "category",
+      "sort_by",
+      "delivery_method",
+      "date_listed",
+      "limit",
+      "max_pages",
+      "response_format",
+    ]);
+    const images = tools.tools.find(
+      (tool) => tool.name === "facebook_marketplace_get_listing_images",
+    )!;
+    assert.deepEqual(Object.keys(images.inputSchema.properties ?? {}), [
+      "listing_id",
+      "image_numbers",
+      "max_images",
+    ]);
+    assert.equal(images.annotations?.readOnlyHint, true);
     const deletion = tools.tools.find(
       (tool) => tool.name === "facebook_marketplace_delete_monitor",
     );
