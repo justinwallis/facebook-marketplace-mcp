@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  cookiesToHeader,
   loadFacebookCookies,
   loadFacebookCookiesFromFile,
   saveFacebookCookiesToFile,
@@ -132,6 +133,54 @@ test("reports invalid sessions without exposing cookie values", () => {
   });
 });
 
+
+
+test("rejects Chrome profile traversal and malformed cookie header values", () => {
+  const chromeDir = mkdtempSync(join(tmpdir(), "chrome-profile-security-test-"));
+  try {
+    assert.throws(
+      () => resolveChromeProfile("../Default", chromeDir),
+      /Invalid Chrome profile name/,
+    );
+    assert.throws(
+      () => resolveChromeProfile("..\\Default", chromeDir),
+      /Invalid Chrome profile name/,
+    );
+  } finally {
+    rmSync(chromeDir, { recursive: true, force: true });
+  }
+
+  const header = cookiesToHeader([
+    {
+      host: ".facebook.com",
+      name: "c_user",
+      value: "123",
+      path: "/",
+      expires: futureExpiry,
+      secure: true,
+      httpOnly: true,
+    },
+    {
+      host: ".facebook.com",
+      name: "bad;name",
+      value: "ignored",
+      path: "/",
+      expires: futureExpiry,
+      secure: true,
+      httpOnly: true,
+    },
+    {
+      host: ".facebook.com",
+      name: "bad_value",
+      value: "ignored\r\nInjected: yes",
+      path: "/",
+      expires: futureExpiry,
+      secure: true,
+      httpOnly: true,
+    },
+  ]);
+  assert.equal(header, "c_user=123");
+});
 
 test("resolves Chrome profile display names through Local State", () => {
   const chromeDir = mkdtempSync(join(tmpdir(), "chrome-profile-test-"));
