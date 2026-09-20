@@ -15,7 +15,9 @@ import {
   createMonitorOutput,
   deleteMonitorInput,
   deleteMonitorOutput,
+  getListingImagesInput,
   getListingInput,
+  listingImagesOutput,
   listingOutput,
   listMonitorsInput,
   listMonitorsOutput,
@@ -29,6 +31,7 @@ import {
   createGetListingHandler,
   createSearchListingsHandler,
 } from "./tools/listing.js";
+import { createGetListingImagesHandler } from "./tools/images.js";
 import { createSearchLocationsHandler } from "./tools/location.js";
 import { localMonitorStore } from "./mcp/monitor-store.js";
 
@@ -84,6 +87,25 @@ server.registerTool(
     },
   },
   createGetListingHandler(client),
+);
+
+// Return selected listing photos as native MCP image content
+server.registerTool(
+  "facebook_marketplace_get_listing_images",
+  {
+    title: "Get Marketplace listing photos",
+    description:
+      "Return selected Marketplace listing photos as bounded native MCP image content for visual inspection.",
+    inputSchema: getListingImagesInput,
+    outputSchema: listingImagesOutput,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  createGetListingImagesHandler(client),
 );
 
 // Search for a location (get coordinates)
