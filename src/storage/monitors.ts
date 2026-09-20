@@ -9,14 +9,18 @@ const MONITORS_FILE = path.join(STORAGE_DIR, "monitors.json");
 
 function ensureStorageDir() {
   if (!fs.existsSync(STORAGE_DIR)) {
-    fs.mkdirSync(STORAGE_DIR, { recursive: true });
+    fs.mkdirSync(STORAGE_DIR, { recursive: true, mode: 0o700 });
   }
+  fs.chmodSync(STORAGE_DIR, 0o700);
 }
 
 export function loadMonitors(): SavedMonitor[] {
   ensureStorageDir();
   if (!fs.existsSync(MONITORS_FILE)) {
     return [];
+  }
+  if (fs.lstatSync(MONITORS_FILE).isSymbolicLink()) {
+    throw new Error("Refusing to read Marketplace monitor state through a symbolic link.");
   }
   try {
     const data = fs.readFileSync(MONITORS_FILE, "utf-8");
@@ -28,7 +32,27 @@ export function loadMonitors(): SavedMonitor[] {
 
 export function saveMonitors(monitors: SavedMonitor[]) {
   ensureStorageDir();
-  fs.writeFileSync(MONITORS_FILE, JSON.stringify(monitors, null, 2));
+  if (
+    fs.existsSync(MONITORS_FILE) &&
+    fs.lstatSync(MONITORS_FILE).isSymbolicLink()
+  ) {
+    throw new Error("Refusing to write Marketplace monitor state through a symbolic link.");
+  }
+
+  const tempFile = path.join(
+    STORAGE_DIR,
+    `.monitors-${process.pid}-${Date.now()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify(monitors, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    fs.renameSync(tempFile, MONITORS_FILE);
+    fs.chmodSync(MONITORS_FILE, 0o600);
+  } finally {
+    if (fs.existsSync(tempFile)) fs.rmSync(tempFile, { force: true });
+  }
 }
 
 export function addMonitor(
