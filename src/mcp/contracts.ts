@@ -36,6 +36,21 @@ const monitorSchema = z.object({
   min_price: z.number().optional(),
   max_price: z.number().optional(),
   category: z.string().optional(),
+  sort_by: z
+    .enum([
+      "suggested",
+      "distance",
+      "date_listed",
+      "price_low_to_high",
+      "price_high_to_low",
+    ])
+    .optional(),
+  delivery_method: z.enum(["all", "local_pickup", "shipping"]).optional(),
+  date_listed: z
+    .enum(["all", "last_24_hours", "last_7_days", "last_30_days"])
+    .optional(),
+  limit: z.number().int().positive(),
+  max_pages: z.number().int().positive(),
   created_at: z.string(),
   last_checked: nullableStringSchema,
   seen_count: z.number().int().nonnegative(),
@@ -140,6 +155,29 @@ export const getListingInput = z
   })
   .strict();
 
+export const getListingImagesInput = z
+  .object({
+    listing_id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .describe("Facebook Marketplace listing ID."),
+    image_numbers: z
+      .array(z.number().int().min(1).max(100))
+      .max(10)
+      .optional()
+      .describe("Specific 1-based listing photo numbers to return."),
+    max_images: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .default(4)
+      .describe("Maximum photos to return when image_numbers is omitted."),
+  })
+  .strict();
+
 export const searchLocationsInput = z
   .object({
     query: z
@@ -161,6 +199,38 @@ export const createMonitorInput = z
       .max(100)
       .describe("Unique saved-monitor name."),
     ...searchFields,
+    sort_by: z
+      .enum([
+        "suggested",
+        "distance",
+        "date_listed",
+        "price_low_to_high",
+        "price_high_to_low",
+      ])
+      .default("suggested")
+      .describe("Result order used when the monitor checks."),
+    delivery_method: z
+      .enum(["all", "local_pickup", "shipping"])
+      .default("all")
+      .describe("Delivery-method preference used when the monitor checks."),
+    date_listed: z
+      .enum(["all", "last_24_hours", "last_7_days", "last_30_days"])
+      .default("all")
+      .describe("Listed-within filter used when the monitor checks."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_SEARCH_LIMIT)
+      .default(72)
+      .describe("Maximum unique listings to inspect per monitor check."),
+    max_pages: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .default(3)
+      .describe("Maximum Marketplace pages to scan per monitor check."),
     response_format: responseFormatSchema,
   })
   .strict()
@@ -229,6 +299,19 @@ export const listingOutput = z.object({
   }),
   ...truncationFields,
 });
+export const listingImagesOutput = z.object({
+  listing_id: z.string(),
+  title: z.string(),
+  requested_images: z.array(z.number().int().positive()),
+  returned_images: z.array(z.number().int().positive()),
+  failures: z.array(
+    z.object({
+      image_number: z.number().int().positive(),
+      message: z.string(),
+    }),
+  ),
+});
+
 export const locationsOutput = z.object({
   query: z.string(),
   count: z.number().int().nonnegative(),
