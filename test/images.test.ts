@@ -56,7 +56,9 @@ test("returns bounded native image content from Facebook CDN URLs", async () => 
     });
 
     assert.equal(result.isError, undefined);
-    assert.deepEqual(result.structuredContent, {
+    const structured = (result as { structuredContent?: Record<string, unknown> })
+      .structuredContent;
+    assert.deepEqual(structured, {
       listing_id: "123",
       title: "Test listing",
       requested_images: [2, 1],
@@ -92,9 +94,11 @@ test("rejects non-Facebook image hosts without fetching them", async () => {
 
     assert.equal(result.isError, true);
     assert.equal(fetches, 0);
-    assert.deepEqual(result.structuredContent?.returned_images, []);
+    const structured = (result as { structuredContent?: Record<string, unknown> })
+      .structuredContent;
+    assert.deepEqual(structured?.returned_images, []);
     assert.match(
-      JSON.stringify(result.structuredContent?.failures),
+      JSON.stringify(structured?.failures),
       /Facebook CDN/,
     );
   } finally {
