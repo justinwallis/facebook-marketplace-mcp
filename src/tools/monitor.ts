@@ -26,11 +26,11 @@ export function createCreateMonitorHandler(store: MonitorStore) {
         minPrice: args.min_price,
         maxPrice: args.max_price,
         category: args.category,
-        sortBy: args.sort_by,
-        deliveryMethod: args.delivery_method,
-        dateListed: args.date_listed,
-        limit: args.limit,
-        maxPages: args.max_pages,
+        sortBy: args.sort_by ?? "suggested",
+        deliveryMethod: args.delivery_method ?? "all",
+        dateListed: args.date_listed ?? "all",
+        limit: args.limit ?? 72,
+        maxPages: args.max_pages ?? 3,
       });
       const output = { monitor: monitorOutput(monitor) };
       return responseFor(
