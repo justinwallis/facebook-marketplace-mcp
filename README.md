@@ -256,7 +256,7 @@ GraphQL traffic is self-rate-limited to 3 requests/minute with random jitter. Li
 
 The MCP does not schedule itself. A persistent scheduler or agent should call `facebook_marketplace_check_monitors` at a modest cadence, triage only the newly returned listings, and optionally call `facebook_marketplace_get_listing` / `facebook_marketplace_get_listing_images` for promising or poorly described results.
 
-The first monitor check establishes a baseline and returns no "new" inventory. This avoids a notification storm when a watch is created. See [docs/marketplace-watch.md](docs/marketplace-watch.md) for the recommended flow.
+The first monitor check establishes a baseline and returns no "new" inventory. This avoids a notification storm when a watch is created. See [docs/marketplace-watch.md](docs/marketplace-watch.md) for the recommended flow. A reusable agent playbook is also included at [skills/marketplace-watch/SKILL.md](skills/marketplace-watch/SKILL.md).
 
 ## Limitations
 
