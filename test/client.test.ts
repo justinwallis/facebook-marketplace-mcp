@@ -114,6 +114,33 @@ test("accepts valid JSON and Facebook's anti-JSONP prefix without logging warnin
   }
 });
 
+test("enforces zero and positive maximum prices and excludes unknown prices", async () => {
+  const priceData = {
+    marketplace_search: {
+      feed_units: {
+        edges: [
+          { node: { listing: { id: "free", marketplace_listing_title: "Free", listing_price: { formatted_amount: "$0" } } } },
+          { node: { listing: { id: "cheap", marketplace_listing_title: "Cheap", listing_price: { formatted_amount: "$25" } } } },
+          { node: { listing: { id: "expensive", marketplace_listing_title: "Expensive", listing_price: { formatted_amount: "$125" } } } },
+          { node: { listing: { id: "unknown", marketplace_listing_title: "Unknown", listing_price: { formatted_amount: "Contact seller" } } } },
+        ],
+        page_info: { has_next_page: false, end_cursor: null },
+      },
+    },
+  };
+
+  await withResponse(JSON.stringify({ data: priceData }), async (client) => {
+    const free = await client.searchListings({ ...params, maxPrice: 0 });
+    assert.deepEqual(free.listings.map((listing) => listing.id), ["free"]);
+
+    const capped = await client.searchListings({ ...params, maxPrice: 25 });
+    assert.deepEqual(capped.listings.map((listing) => listing.id), ["free", "cheap"]);
+
+    const unknownOnly = await client.searchListings({ ...params, maxPrice: 500 });
+    assert.equal(unknownOnly.listings.some((listing) => listing.id === "unknown"), false);
+  });
+});
+
 test("accepts newline-delimited deferred GraphQL payloads", async () => {
   const body = [
     JSON.stringify({ data: validData, errors: [] }),
@@ -514,4 +541,66 @@ test("distinguishes an empty location result from malformed location data", asyn
       return true;
     });
   });
+});
+
+test("fails closed when location resolution returns edges without usable coordinates", async () => {
+  await withResponse(
+    JSON.stringify({
+      data: {
+        city_street_search: {
+          street_results: {
+            edges: [
+              {
+                node: {
+                  single_line_address: "Churchville, MD",
+                  location: { latitude: "39.56", longitude: null },
+                },
+              },
+            ],
+          },
+        },
+      },
+    }),
+    async (client) => {
+      await assert.rejects(client.searchLocation("Churchville"), (error: unknown) => {
+        assert.ok(error instanceof MarketplaceRequestError);
+        assert.match(error.message, /Failed to parse Marketplace location response/);
+        return true;
+      });
+    },
+  );
+});
+
+test("preserves ambiguous location matches instead of silently selecting one", async () => {
+  await withResponse(
+    JSON.stringify({
+      data: {
+        city_street_search: {
+          street_results: {
+            edges: [
+              {
+                node: {
+                  single_line_address: "Springfield, MD",
+                  location: { latitude: 39.49, longitude: -76.98 },
+                },
+              },
+              {
+                node: {
+                  single_line_address: "Springfield, VA",
+                  location: { latitude: 38.79, longitude: -77.19 },
+                },
+              },
+            ],
+          },
+        },
+      },
+    }),
+    async (client) => {
+      const locations = await client.searchLocation("Springfield");
+      assert.deepEqual(locations, [
+        { name: "Springfield, MD", latitude: 39.49, longitude: -76.98 },
+        { name: "Springfield, VA", latitude: 38.79, longitude: -77.19 },
+      ]);
+    },
+  );
 });

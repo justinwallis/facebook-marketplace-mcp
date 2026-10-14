@@ -26,6 +26,11 @@ const listingSchema = z.object({
   needs_hydration: z.boolean(),
 });
 
+const listingChangeSchema = z.object({
+  from: z.union([z.string(), z.boolean()]),
+  to: z.union([z.string(), z.boolean()]),
+});
+
 const monitorSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -328,6 +333,11 @@ export const checkMonitorsOutput = z.object({
       name: z.string(),
       found: z.boolean(),
       new_listings: z.array(listingSchema),
+      updated_listings: z.array(
+        listingSchema.extend({
+          changes: z.record(z.string(), listingChangeSchema),
+        }),
+      ),
     }),
   ),
   ...truncationFields,

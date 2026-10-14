@@ -2,6 +2,7 @@ import type {
   MarketplaceListing,
   MarketplaceListingDetail,
   SavedMonitor,
+  MonitorListingSnapshot,
   SearchParams,
   SearchResult,
 } from "../facebook/types.js";
@@ -19,6 +20,8 @@ export interface MonitorStore {
   list(): SavedMonitor[];
   get(name: string): SavedMonitor | undefined;
   updateSeenIds(name: string, newIds: string[]): void;
+  /** Optional for compatibility with stores implemented before snapshots existed. */
+  updateSnapshots?(name: string, snapshots: MonitorListingSnapshot[]): void;
   delete(name: string): boolean;
 }
 

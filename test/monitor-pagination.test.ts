@@ -135,3 +135,66 @@ test("monitor checks truncate large new-listing payloads while marking every ID 
   assert.ok(response.structuredContent.results[0].new_listings.length < 100);
   assert.ok(response.content[0].text.length <= CHARACTER_LIMIT);
 });
+
+test("monitor reports bounded field changes and persists snapshots", async () => {
+  const monitor = {
+    ...saved({
+      query: "desk",
+      latitude: 52.4,
+      longitude: 4.9,
+      radiusKm: 25,
+      limit: 72,
+      maxPages: 3,
+    }),
+    seenIds: ["1"],
+    lastChecked: "2026-09-15T20:00:00.000Z",
+    listingSnapshots: [
+      {
+        id: "1",
+        title: "Old desk",
+        price: "€25",
+        location: "Amsterdam",
+        isPending: false,
+      },
+    ],
+  };
+  let snapshots: unknown[] = [];
+  const store: MonitorStore = {
+    add: () => monitor,
+    list: () => [monitor],
+    get: () => monitor,
+    updateSeenIds: () => undefined,
+    updateSnapshots(_name, next) { snapshots = next; },
+    delete: () => false,
+  };
+  const service: MarketplaceService = {
+    async searchListings() {
+      return {
+        listings: [
+          { ...listing("1"), title: "New desk", price: "€40", location: "Haarlem", isPending: true },
+          listing("2"),
+        ],
+        hasNextPage: false,
+        endCursor: null,
+      };
+    },
+    async getListingDetail() { throw new Error("not used"); },
+    async searchLocation() { return []; },
+  };
+
+  const response = await createCheckMonitorsHandler(service, store)({
+    monitor_name: "desks",
+    response_format: "json",
+  });
+  const result = response.structuredContent.results[0];
+
+  assert.equal(result.new_listings.length, 1);
+  assert.equal(result.new_listings[0].id, "2");
+  assert.deepEqual(result.updated_listings[0].changes, {
+    title: { from: "Old desk", to: "New desk" },
+    price: { from: "€25", to: "€40" },
+    location: { from: "Amsterdam", to: "Haarlem" },
+    is_pending: { from: false, to: true },
+  });
+  assert.equal(snapshots.length, 2);
+});

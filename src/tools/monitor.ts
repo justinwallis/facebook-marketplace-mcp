@@ -2,6 +2,7 @@ import type { z } from "zod/v4";
 import { responseFor, takeWithinCharacterLimit } from "../mcp/response.js";
 import { CHARACTER_LIMIT } from "../mcp/constants.js";
 import type {
+  MarketplaceListing,
   MarketplaceService,
   MonitorStore,
   SavedMonitor,
@@ -14,6 +15,30 @@ import {
   deleteMonitorInput,
   listMonitorsInput,
 } from "../mcp/contracts.js";
+
+function monitorSnapshot(listing: MarketplaceListing) {
+  return {
+    id: listing.id,
+    title: listing.title,
+    price: listing.price,
+    location: listing.location,
+    isPending: listing.isPending,
+  };
+}
+
+function listingChanges(
+  previous: ReturnType<typeof monitorSnapshot>,
+  current: ReturnType<typeof monitorSnapshot>,
+) {
+  const changes: Record<string, { from: string | boolean; to: string | boolean }> = {};
+  if (previous.title !== current.title) changes.title = { from: previous.title, to: current.title };
+  if (previous.price !== current.price) changes.price = { from: previous.price, to: current.price };
+  if (previous.location !== current.location) changes.location = { from: previous.location, to: current.location };
+  if (previous.isPending !== current.isPending) {
+    changes.is_pending = { from: previous.isPending, to: current.isPending };
+  }
+  return changes;
+}
 
 export function createCreateMonitorHandler(store: MonitorStore) {
   return async (args: z.infer<typeof createMonitorInput>) => {
@@ -64,21 +89,40 @@ export function createCheckMonitorsHandler(
         name: string;
         found: boolean;
         new_listings: ReturnType<typeof listingOutput>[];
+        updated_listings: Array<ReturnType<typeof listingOutput> & {
+          changes: Record<string, { from: string | boolean; to: string | boolean }>;
+        }>;
       }> = [];
       for (const monitor of monitors) {
         const search = await service.searchListings(monitor.params);
         const unseenListings = search.listings.filter(
           (listing) => !monitor.seenIds.includes(listing.id),
         );
+        const snapshotsById = new Map(
+          (monitor.listingSnapshots ?? []).map((snapshot) => [snapshot.id, snapshot]),
+        );
+        const updatedListings = search.listings
+          .filter((listing) => monitor.seenIds.includes(listing.id))
+          .map((listing) => {
+            const previous = snapshotsById.get(listing.id);
+            if (!previous) return undefined;
+            const changes = listingChanges(previous, monitorSnapshot(listing));
+            return Object.keys(changes).length
+              ? { ...listingOutput(listing), changes }
+              : undefined;
+          })
+          .filter((listing): listing is NonNullable<typeof listing> => Boolean(listing));
         const isBaseline = monitor.lastChecked === null && monitor.seenIds.length === 0;
         store.updateSeenIds(
           monitor.name,
           unseenListings.map((listing) => listing.id),
         );
+        store.updateSnapshots?.(monitor.name, search.listings.map(monitorSnapshot));
         results.push({
           name: monitor.name,
           found: true,
           new_listings: isBaseline ? [] : unseenListings.map(listingOutput),
+          updated_listings: isBaseline ? [] : updatedListings,
         });
       }
       if (args.monitor_name && results.length === 0)
@@ -86,10 +130,12 @@ export function createCheckMonitorsHandler(
           name: args.monitor_name,
           found: false,
           new_listings: [],
+          updated_listings: [],
         });
       const outputResults = results.map((result) => ({
         ...result,
         new_listings: [...result.new_listings],
+        updated_listings: [...result.updated_listings],
       }));
       let truncated = false;
       const makeOutput = () => ({
@@ -106,9 +152,10 @@ export function createCheckMonitorsHandler(
       while (JSON.stringify(makeOutput(), null, 2).length > CHARACTER_LIMIT) {
         const resultWithListings = [...outputResults]
           .reverse()
-          .find((result) => result.new_listings.length > 0);
+          .find((result) => result.new_listings.length > 0 || result.updated_listings.length > 0);
         if (resultWithListings) {
-          resultWithListings.new_listings.pop();
+          if (resultWithListings.new_listings.length > 0) resultWithListings.new_listings.pop();
+          else resultWithListings.updated_listings.pop();
           truncated = true;
           continue;
         }
@@ -125,7 +172,10 @@ export function createCheckMonitorsHandler(
             .map((result) =>
               !result.found
                 ? `## ${result.name}\n\nMonitor not found.`
-                : `## ${result.name}\n\n${result.new_listings.length ? result.new_listings.map((listing) => `- **${listing.title}** — ${listing.price}\n  ${listing.url}`).join("\n") : "No new listings."}`,
+                : `## ${result.name}\n\n${[
+                    ...result.new_listings.map((listing) => `- **${listing.title}** — ${listing.price}\n  ${listing.url}`),
+                    ...result.updated_listings.map((listing) => `- **Updated: ${listing.title}** — ${Object.keys(listing.changes).join(", ")}\n  ${listing.url}`),
+                  ].join("\n") || "No new listings or listing changes."}`,
             )
             .join("\n\n")
         : "No monitors saved. Create one before checking for new listings.";

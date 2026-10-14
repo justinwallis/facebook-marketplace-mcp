@@ -78,6 +78,15 @@ export interface SearchResult {
   endCursor: string | null;
 }
 
+/** The small, mutable part of a listing needed for monitor change detection. */
+export interface MonitorListingSnapshot {
+  id: string;
+  title: string;
+  price: string;
+  location: string;
+  isPending: boolean;
+}
+
 export interface SavedMonitor {
   id: string;
   name: string;
@@ -85,4 +94,6 @@ export interface SavedMonitor {
   seenIds: string[];
   createdAt: string;
   lastChecked: string | null;
+  /** Optional so monitors saved before snapshot support remain readable. */
+  listingSnapshots?: MonitorListingSnapshot[];
 }

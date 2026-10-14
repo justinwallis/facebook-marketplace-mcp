@@ -100,10 +100,11 @@ export function buildSearchVariables(params: SearchParams) {
         filter_price_lower_bound: params.minPrice
           ? params.minPrice * 100
           : 0,
-        // Maximum price in cents; Facebook's observed maximum leaves the upper bound unfiltered.
-        filter_price_upper_bound: params.maxPrice
-          ? params.maxPrice * 100
-          : 214748364700,
+        // Maximum price in cents; zero is a meaningful Free/$0 filter.
+        filter_price_upper_bound:
+          params.maxPrice !== undefined
+            ? params.maxPrice * 100
+            : 214748364700,
         // Search radius around the requested coordinates, in kilometers.
         filter_radius_km: params.radiusKm,
         // Facebook's suggested sort is represented by omitting this field.
