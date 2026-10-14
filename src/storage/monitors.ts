@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import type { SavedMonitor, SearchParams } from "../facebook/types.js";
+import type {
+  MonitorListingSnapshot,
+  SavedMonitor,
+  SearchParams,
+} from "../facebook/types.js";
+
+const MAX_MONITOR_SNAPSHOTS = 500;
 
 const STORAGE_DIR = path.join(os.homedir(), ".fb-marketplace");
 const MONITORS_FILE = path.join(STORAGE_DIR, "monitors.json");
@@ -97,6 +103,22 @@ export function updateMonitorSeenIds(
   const combined = [...new Set([...monitor.seenIds, ...newIds])];
   monitor.seenIds = combined.slice(-500);
   monitor.lastChecked = new Date().toISOString();
+  saveMonitors(monitors);
+}
+
+export function updateMonitorSnapshots(
+  name: string,
+  snapshots: MonitorListingSnapshot[],
+): void {
+  const monitors = loadMonitors();
+  const monitor = monitors.find((m) => m.name === name);
+  if (!monitor) return;
+
+  const currentById = new Map(
+    (monitor.listingSnapshots ?? []).map((snapshot) => [snapshot.id, snapshot]),
+  );
+  for (const snapshot of snapshots) currentById.set(snapshot.id, snapshot);
+  monitor.listingSnapshots = [...currentById.values()].slice(-MAX_MONITOR_SNAPSHOTS);
   saveMonitors(monitors);
 }
 

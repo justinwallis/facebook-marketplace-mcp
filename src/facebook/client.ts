@@ -18,7 +18,7 @@ import {
 } from "./queries.js";
 import { parseSearchResponse, parseListingDetailFromPage } from "./parser.js";
 import { captureListingPageHtml } from "./raw-capture.js";
-import { RateLimiter } from "../utils/rate-limit.js";
+import { DEFAULT_MAX_REQUESTS_PER_MINUTE, RateLimiter } from "../utils/rate-limit.js";
 import {
   MarketplaceRequestError,
   recordGraphqlWarning,
@@ -32,6 +32,37 @@ const USER_AGENT =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseMarketplacePrice(price: string): number | null {
+  const normalized = price.trim().toLowerCase();
+  if (!normalized || normalized === "n/a" || normalized === "unknown") {
+    return null;
+  }
+  if (/^(?:free|\$?0(?:\.0{1,2})?)$/.test(normalized)) return 0;
+
+  const match = normalized.replaceAll(",", "").match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function applyPriceFilters(
+  listings: SearchResult["listings"],
+  params: SearchParams,
+) {
+  if (params.minPrice === undefined && params.maxPrice === undefined) {
+    return listings;
+  }
+
+  return listings.filter((listing) => {
+    const price = parseMarketplacePrice(listing.price);
+    // Unknown prices cannot be proven to satisfy a requested price bound.
+    if (price === null) return false;
+    if (params.minPrice !== undefined && price < params.minPrice) return false;
+    if (params.maxPrice !== undefined && price > params.maxPrice) return false;
+    return true;
+  });
 }
 
 function graphqlErrorSummary(response: Record<string, unknown>) {
@@ -107,7 +138,7 @@ export class FacebookClient {
       chromeProfile?: string;
     } = {},
   ) {
-    this.rateLimiter = new RateLimiter(options.maxRequestsPerMinute ?? 3);
+    this.rateLimiter = new RateLimiter(options.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE);
     this.pageRateLimiter = new RateLimiter(options.maxPageFetchesPerMinute ?? 30);
     this.sessionFile = options.sessionFile;
     this.chromeProfile = options.chromeProfile;
@@ -248,7 +279,10 @@ export class FacebookClient {
     variables: Record<string, unknown>,
   ): Promise<unknown> {
     const session = await this.ensureSession();
+    const queueStartedAt = Date.now();
+    console.error("[facebook-mcp-timing] rate-limit queue wait start");
     await this.rateLimiter.wait();
+    console.error(`[facebook-mcp-timing] rate-limit queue wait: ${Date.now() - queueStartedAt}ms`);
 
     this.reqCounter++;
 
@@ -269,27 +303,33 @@ export class FacebookClient {
       path: "/api/graphql/",
       docId,
     };
-    const res = await this.fetchFacebook(
-      GRAPHQL_URL,
-      {
-        method: "POST",
-        headers: {
-          ...BROWSER_HEADERS,
-          "User-Agent": this.userAgent,
-          Cookie: session.cookieHeader,
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "*/*",
-          "sec-fetch-dest": "empty",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "same-origin",
-          Origin: "https://www.facebook.com",
-          Referer: "https://www.facebook.com/marketplace/",
-          "X-FB-LSD": session.lsd,
+    const networkStartedAt = Date.now();
+    let res: Response;
+    try {
+      res = await this.fetchFacebook(
+        GRAPHQL_URL,
+        {
+          method: "POST",
+          headers: {
+            ...BROWSER_HEADERS,
+            "User-Agent": this.userAgent,
+            Cookie: session.cookieHeader,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "*/*",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            Origin: "https://www.facebook.com",
+            Referer: "https://www.facebook.com/marketplace/",
+            "X-FB-LSD": session.lsd,
+          },
+          body: body.toString(),
         },
-        body: body.toString(),
-      },
-      request,
-    );
+        request,
+      );
+    } finally {
+      console.error(`[facebook-mcp-timing] network/search duration: ${Date.now() - networkStartedAt}ms`);
+    }
 
     if (res.status === 401 || res.status === 403) {
       // Session expired — clear and retry once
@@ -436,6 +476,7 @@ export class FacebookClient {
         }
       }
 
+      result.listings = applyPriceFilters(result.listings, params);
       return result;
     } catch (error) {
       if (error instanceof MarketplaceRequestError) throw error;

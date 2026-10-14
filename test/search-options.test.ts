@@ -59,6 +59,7 @@ test("listing-search handler forwards the new options to Marketplace", async () 
     delivery_method: "shipping",
     date_listed: "last_24_hours",
     max_pages: 3,
+    max_price: 0,
   });
   await createSearchListingsHandler(service)(args);
 
@@ -66,6 +67,7 @@ test("listing-search handler forwards the new options to Marketplace", async () 
   assert.equal(received?.deliveryMethod, "shipping");
   assert.equal(received?.dateListed, "last_24_hours");
   assert.equal(received?.maxPages, 3);
+  assert.equal(received?.maxPrice, 0);
 });
 
 test("search variables reproduce captured sort and delivery mappings", () => {
@@ -87,6 +89,19 @@ test("search variables reproduce captured sort and delivery mappings", () => {
     });
     assert.equal(request.commerce_search_sort_by, expected);
   }
+
+  assert.equal(
+    browseRequest({ ...base, maxPrice: 0 }).filter_price_upper_bound,
+    0,
+  );
+  assert.equal(
+    browseRequest({ ...base, maxPrice: 125.5 }).filter_price_upper_bound,
+    12_550,
+  );
+  assert.equal(
+    browseRequest(base).filter_price_upper_bound,
+    214748364700,
+  );
 
   assert.deepEqual(
     [
