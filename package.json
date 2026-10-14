@@ -12,6 +12,8 @@
     "test": "tsx --test test/*.test.ts",
     "inspector": "npm run build && mcp-inspector node dist/index.js",
     "start": "node dist/index.js",
+    "dashboard": "tsx scripts/hardware-watch-dashboard.ts",
+    "free-finds-scheduler": "tsx scripts/free-finds-service.ts",
     "dev": "tsx src/index.ts",
     "login": "tsx src/facebook/login.ts",
     "capture-queries": "tsx scripts/capture-queries.ts"
