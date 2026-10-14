@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const FREE_FINDS_REVIEW_FILENAME = "free-finds-reviews.json";
@@ -39,6 +39,7 @@ export async function saveFreeFindsReview(root: string, listingId: unknown, inpu
   const current = await loadFreeFindsReviews(root);
   const pickupAt = input.pickupAt === null || input.pickupAt === undefined || input.pickupAt === "" ? null : String(input.pickupAt);
   current.reviews[listingId] = { status: input.status as FreeFindsReviewStatus, pickupStatus: (input.pickupStatus ?? current.reviews[listingId]?.pickupStatus ?? "None") as FreeFindsPickupStatus, pickupNotes: String(input.pickupNotes ?? ""), pickupAt, notes: String(input.notes ?? ""), reviewedAt: new Date().toISOString() };
+  await mkdir(root, { recursive: true });
   await writeFile(freeFindsReviewPath(root), `${JSON.stringify({ version: 1, reviews: current.reviews }, null, 2)}\n`, "utf8");
   return { reviews: current.reviews, issues: current.issues };
 }
@@ -53,6 +54,7 @@ export async function saveFreeFindsReviews(root: string, listingIds: unknown, st
     const previous = current.reviews[listingId];
     current.reviews[listingId] = { status: status as FreeFindsReviewStatus, pickupStatus: previous?.pickupStatus ?? "None", pickupNotes: previous?.pickupNotes ?? "", pickupAt: previous?.pickupAt ?? null, notes: previous?.notes ?? "", reviewedAt };
   }
+  await mkdir(root, { recursive: true });
   await writeFile(freeFindsReviewPath(root), `${JSON.stringify({ version: 1, reviews: current.reviews }, null, 2)}\n`, "utf8");
   return { reviews: current.reviews, issues: current.issues };
 }

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, estimateRateLimitWaitRange } from "../src/utils/rate-limit.js";
 
@@ -74,6 +74,7 @@ export function validateFreeFindsConfig(value: unknown): string[] {
     if (!Number.isInteger(query.maxPages) || query.maxPages < 1 || query.maxPages > 3) errors.push(`Free Finds query ${index + 1} page count must be an integer from 1 to 3.`);
     if (query.latitude !== undefined && (!number(query.latitude) || query.latitude < -90 || query.latitude > 90)) errors.push(`Free Finds query ${index + 1} latitude is invalid.`);
     if (query.longitude !== undefined && (!number(query.longitude) || query.longitude < -180 || query.longitude > 180)) errors.push(`Free Finds query ${index + 1} longitude is invalid.`);
+    if (query.latitude !== undefined || query.longitude !== undefined) errors.push(`Free Finds query ${index + 1} per-query center overrides are unsupported; use the global center.`);
     if (query.radiusKm !== undefined && (!number(query.radiusKm) || query.radiusKm <= 0 || query.radiusKm > 500)) errors.push(`Free Finds query ${index + 1} radius must be greater than 0 and no more than 500 km.`);
     if (query.maxPrice !== undefined && query.maxPrice !== 0) errors.push(`Free Finds query ${index + 1} maxPrice must remain exactly 0.`);
   }
@@ -109,6 +110,7 @@ export async function saveFreeFindsConfig(root: string, value: unknown): Promise
   const errors = validateFreeFindsConfig(value);
   if (errors.length) throw new Error(errors.join(" "));
   const config = normalizeFreeFindsConfig(value);
+  await mkdir(root, { recursive: true });
   await writeFile(freeFindsConfigPath(root), `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
 }

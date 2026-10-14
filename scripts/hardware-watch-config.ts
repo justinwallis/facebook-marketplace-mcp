@@ -1,4 +1,4 @@
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WATCH_CENTER, WATCH_RADIUS_KM } from "./hardware-watch-filter.js";
 
@@ -139,6 +139,7 @@ export async function savePendingConfiguration(outputRoot: string, value: unknow
   const errors = validateWatchConfig(value);
   if (errors.length) throw new Error(errors.join(" "));
   const pending = normalizeWatchConfig(value);
+  await mkdir(outputRoot, { recursive: true });
   await writeFile(configPaths(outputRoot).pending, `${JSON.stringify({ ...pending, savedAt: new Date().toISOString(), status: "pending" }, null, 2)}\n`, "utf8");
   return { pending, diff: diffWatchConfig(await loadActiveWatchConfig(outputRoot), pending) };
 }
@@ -158,6 +159,7 @@ export async function applyPendingConfiguration(outputRoot: string, confirmation
   const paths = configPaths(outputRoot);
   const state = await loadConfigurationState(outputRoot);
   if (!state.pending) throw new Error("No valid pending configuration is available.");
+  await mkdir(outputRoot, { recursive: true });
   await writeFile(paths.backup, `${JSON.stringify({ ...state.active, backedUpAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
   await writeFile(paths.active, `${JSON.stringify(state.pending, null, 2)}\n`, "utf8");
   await writeFile(paths.pending, `${JSON.stringify({ ...state.pending, savedAt: new Date().toISOString(), status: "applied" }, null, 2)}\n`, "utf8");
@@ -172,6 +174,7 @@ export async function revertLastAppliedConfiguration(outputRoot: string, confirm
   const restored = normalizeWatchConfig(backup);
   const errors = validateWatchConfig(restored);
   if (errors.length) throw new Error("The configuration backup is invalid.");
+  await mkdir(outputRoot, { recursive: true });
   await writeFile(paths.active, `${JSON.stringify(restored, null, 2)}\n`, "utf8");
   return loadConfigurationState(outputRoot);
 }

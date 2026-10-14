@@ -59,6 +59,18 @@ test("saves pending config, requires confirmation, backs up active config, and r
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test("Hardware Watch configuration writers create a missing parent directory", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "hardware-watch-missing-parent-"));
+  const directory = join(parent, "new", "config");
+  try {
+    await savePendingConfiguration(directory, configWith({ radiusKm: 90 }));
+    await applyPendingConfiguration(directory, "APPLY_NEXT_RUN");
+    assert.equal((await loadConfigurationState(directory)).hasBackup, true);
+    await revertLastAppliedConfiguration(directory, "REVERT_LAST_APPLIED");
+    assert.deepEqual(await loadActiveWatchConfig(directory), DEFAULT_WATCH_CONFIG);
+  } finally { await rm(parent, { recursive: true, force: true }); }
+});
+
 test("the next watcher config load sees an applied config, and revert restores the exact prior config", async () => {
   const directory = await mkdtemp(join(tmpdir(), "hardware-watch-config-lifecycle-"));
   try {

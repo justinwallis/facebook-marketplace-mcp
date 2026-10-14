@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const FREE_FINDS_SCHEDULER_FILENAME = "free-finds-scheduler.json";
@@ -63,6 +63,7 @@ export function nextFreeFindsRunAt(now: Date): string { return new Date(now.getT
 export async function saveFreeFindsScheduler(root: string, state: FreeFindsSchedulerConfig): Promise<FreeFindsSchedulerConfig> {
   const errors = validateFreeFindsScheduler(state);
   if (errors.length) throw new Error(errors.join(" "));
+  await mkdir(root, { recursive: true });
   await writeFile(freeFindsSchedulerPath(root), `${JSON.stringify(state, null, 2)}\n`, "utf8");
   return state;
 }

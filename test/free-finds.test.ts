@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { DEFAULT_FREE_FINDS_CONFIG, estimateFreeFindsWaitMs, normalizeFreeFindsConfig, previewFreeFindsReadiness, saveFreeFindsConfig, validateFreeFindsConfig } from "../scripts/free-finds-config.js";
 import { FREE_FINDS_PICKUP_STATUSES, loadFreeFindsReviews, saveFreeFindsReview, saveFreeFindsReviews } from "../scripts/free-finds-review.js";
+import { ENABLE_FREE_FINDS_CONFIRMATION, setFreeFindsScheduler } from "../scripts/free-finds-scheduler.js";
 import { classifyFreeFindsPrice, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, INTER_REQUEST_JITTER_MS, WINDOW_WAIT_JITTER_MS } from "../src/utils/rate-limit.js";
 
@@ -14,6 +15,7 @@ test("Free Finds configuration is isolated, validates duplicates, bounds, and un
   assert.match(validateFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, maxPrice: 10 } as any).join(" "), /exactly 0/);
   assert.match(validateFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, queries: [{ query: "Free", limit: 0, maxPages: 4 }, { query: "free", limit: 10, maxPages: 1 }] }).join(" "), /Duplicate/);
   assert.deepEqual(validateFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, queries: [{ query: "free", limit: 10, maxPages: 1, radiusKm: 40, maxPrice: 0 }] }), []);
+  assert.match(validateFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, queries: [{ query: "free", limit: 10, maxPages: 1, latitude: 39.56 }] as any }).join(" "), /per-query center overrides are unsupported/);
   assert.match(validateFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, queries: [{ query: "free", limit: 10, maxPages: 1, maxPrice: 1 as any }] }).join(" "), /maxPrice/);
   const directory = await mkdtemp(join(tmpdir(), "free-finds-config-"));
   try {
@@ -22,6 +24,17 @@ test("Free Finds configuration is isolated, validates duplicates, bounds, and un
     assert.equal(JSON.parse(await readFile(join(directory, "free-finds-configuration.json"), "utf8")).maxPrice, 0);
     assert.equal(estimateFreeFindsWaitMs(normalizeFreeFindsConfig({ ...DEFAULT_FREE_FINDS_CONFIG, queries: [{ query: "a", limit: 1, maxPages: 2 }] })), INTER_REQUEST_JITTER_MS.max);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("Free Finds local state writers create a missing parent directory", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "free-finds-missing-parent-"));
+  const directory = join(parent, "new", "state");
+  try {
+    await saveFreeFindsConfig(directory, DEFAULT_FREE_FINDS_CONFIG);
+    await saveFreeFindsReview(directory, "free-1", { status: "Interested" });
+    await setFreeFindsScheduler(directory, true, ENABLE_FREE_FINDS_CONFIRMATION, new Date("2026-10-13T01:00:00Z"));
+    assert.equal((await loadFreeFindsReviews(directory)).reviews["free-1"].status, "Interested");
+  } finally { await rm(parent, { recursive: true, force: true }); }
 });
 
 test("Free Finds readiness preview matches the configured limiter and reports global location behavior", () => {
