@@ -607,6 +607,9 @@ test("Free Finds is isolated, configuration/review-only, and has no hourly or Ru
   assert.match(source, /reappeared/);
   assert.match(source, /unavailableDistance/);
   assert.match(source, /unavailablePrice/);
+  assert.match(source, /Duplicate status unavailable/);
+  assert.match(source, /listingCount!==null/);
+  assert.match(source, /No duplicate listing IDs were recorded/);
   assert.match(source, /previewFreeFindsReadiness/);
   assert.match(source, /requestCount|resultSlots|estimated limiter wait/);
   assert.match(source, /freePriceSignal/);
