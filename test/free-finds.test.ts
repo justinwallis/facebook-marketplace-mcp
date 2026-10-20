@@ -114,6 +114,10 @@ test("Free Finds run history deduplicates stable IDs and reports new/changed lis
     assert.deepEqual(history[0].updatedIds, ["same"]);
     assert.equal(history[0].changes.same[0].field, "price");
     assert.equal(history[0].comparisonSource, "free-finds-report-2026-10-13T01-00-00-000Z.json");
+    assert.equal(history[0].duplicateCount, 0);
+    const firstRun = history.find((run) => run.name === "free-finds-report-2026-10-13T01-00-00-000Z.json")!;
+    assert.equal(firstRun.duplicateCount, 1);
+    assert.match(firstRun.warnings.join(" "), /duplicate listing ID/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

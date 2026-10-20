@@ -137,3 +137,5 @@ Before any owner enables a real hourly process, the owner must review applicable
 5. Add uncertain resale/deal evaluation as a separate, review-only mode with visible assumptions, unknowns, fees, condition, and no automatic valuation claims.
 6. Add compact photo-based review using only saved authorized image URLs; never scrape listing pages, contact sellers, or infer condition from missing photos.
 7. Harden reliability and privacy: validate retention/recovery boundaries, minimize local sensitive data, document rate-limit behavior, and keep all storage/report/log paths isolated from Hardware Watch.
+
+Saved Free Finds snapshots retain their raw listing arrays. If a snapshot repeats a stable listing ID, the dashboard collapses that ID only for saved-result comparison, reports the duplicate-entry count in run history, and leaves the raw report unchanged.
