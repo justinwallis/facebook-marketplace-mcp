@@ -6,7 +6,7 @@ import test from "node:test";
 import { DEFAULT_FREE_FINDS_CONFIG, estimateFreeFindsWaitMs, normalizeFreeFindsConfig, previewFreeFindsReadiness, saveFreeFindsConfig, validateFreeFindsConfig } from "../scripts/free-finds-config.js";
 import { FREE_FINDS_PICKUP_STATUSES, loadFreeFindsReviews, saveFreeFindsReview, saveFreeFindsReviews } from "../scripts/free-finds-review.js";
 import { ENABLE_FREE_FINDS_CONFIRMATION, setFreeFindsScheduler } from "../scripts/free-finds-scheduler.js";
-import { classifyFreeFindsPrice, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
+import { classifyFreeFindsPrice, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, INTER_REQUEST_JITTER_MS, WINDOW_WAIT_JITTER_MS } from "../src/utils/rate-limit.js";
 
 test("Free Finds configuration is isolated, validates duplicates, bounds, and unsupported cadence", async () => {
@@ -244,6 +244,13 @@ test("Free Finds query summaries count saved review/history states without imply
     { query: "computers", total: 1, newCount: 0, unreviewedCount: 1, repeatedCount: 0, reappearedCount: 1 },
     { query: "furniture", total: 2, newCount: 1, unreviewedCount: 1, repeatedCount: 1, reappearedCount: 0 },
   ]);
+});
+
+test("Free Finds query filter isolates one saved query and preserves unavailable-query diagnostics", () => {
+  const items = [{ id: "a", query: "free computers" }, { id: "b", query: "free furniture" }, { id: "c" }];
+  assert.deepEqual(filterFreeFindsByQuery(items, "all").map((item) => item.id), ["a", "b", "c"]);
+  assert.deepEqual(filterFreeFindsByQuery(items, "free furniture").map((item) => item.id), ["b"]);
+  assert.deepEqual(filterFreeFindsByQuery(items, "(query unavailable)").map((item) => item.id), ["c"]);
 });
 
 test("Free Finds needs-attention summary counts saved-result review and health signals", () => {

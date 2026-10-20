@@ -122,6 +122,12 @@ export function summarizeFreeFindsListings(items: Array<Pick<FreeFindsListing, "
   return [...summaries.values()].sort((a, b) => a.query.localeCompare(b.query));
 }
 
+export function filterFreeFindsByQuery<T extends { query?: unknown }>(items: T[], query: string): T[] {
+  if (query === "all") return items;
+  if (query === "(query unavailable)") return items.filter((item) => typeof item.query !== "string" || !item.query.trim());
+  return items.filter((item) => typeof item.query === "string" && item.query.trim() === query);
+}
+
 export function selectFreeFindsBulkIds(visibleIds: string[], selectedIds: Iterable<string>): string[] {
   const selected = new Set(selectedIds);
   return [...new Set(visibleIds.filter((id) => selected.has(id)))];

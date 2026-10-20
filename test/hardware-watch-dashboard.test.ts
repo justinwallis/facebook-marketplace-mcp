@@ -631,6 +631,12 @@ test("Free Finds is isolated, configuration/review-only, and has no hourly or Ru
   assert.match(source, /restoreFreeFindsFilters/);
   assert.match(source, /saveFreeFindsFilters/);
   assert.match(source, /freeFindsQuerySummary/);
+  assert.match(source, /freeQueryFilter/);
+  assert.match(source, /All saved queries/);
+  assert.match(source, /queryFilter==='all'/);
+  assert.match(source, /query:document\.getElementById\('freeQueryFilter'\)\.value/);
+  assert.match(source, /freeQueryFilter.*onchange=freeFilterChanged/);
+  assert.match(source, /saved\.query.*currentQuery/);
   assert.match(source, /Current view by saved query/);
   assert.match(source, /counts are saved listings, not confirmed-free results/);
   assert.match(source, /free-query-group/);
