@@ -121,6 +121,17 @@ test("Free Finds run history deduplicates stable IDs and reports new/changed lis
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test("Free Finds marks duplicate status unavailable when no readable listing snapshot exists", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "free-finds-no-snapshot-"));
+  try {
+    await writeFile(join(directory, "free-finds-report-2026-10-13T03-00-00-000Z.json"), JSON.stringify({ runAt: "2026-10-13T03:00:00.000Z", errors: [] }));
+    const history = await loadFreeFindsRunHistory(directory, new Date("2026-10-13T04:00:00Z"));
+    assert.equal(history[0].listingCount, null);
+    assert.equal(history[0].duplicateCount, 0);
+    assert.match(history[0].warnings.join(" "), /snapshot is unavailable/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("Free Finds exposes a price signal without claiming that any listing is confirmed free", async () => {
   assert.equal(classifyFreeFindsPrice("$0"), "listed_at_zero");
   assert.equal(classifyFreeFindsPrice("Free"), "listed_as_free");
