@@ -6,7 +6,7 @@ import test from "node:test";
 import { DEFAULT_FREE_FINDS_CONFIG, estimateFreeFindsWaitMs, normalizeFreeFindsConfig, previewFreeFindsReadiness, saveFreeFindsConfig, validateFreeFindsConfig } from "../scripts/free-finds-config.js";
 import { FREE_FINDS_PICKUP_STATUSES, loadFreeFindsReviews, saveFreeFindsReview, saveFreeFindsReviews } from "../scripts/free-finds-review.js";
 import { ENABLE_FREE_FINDS_CONFIRMATION, setFreeFindsScheduler } from "../scripts/free-finds-scheduler.js";
-import { classifyFreeFindsPrice, compareFreeFindsActionPriority, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsHistoryFilter, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
+import { classifyFreeFindsPrice, compareFreeFindsActionPriority, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsEvidenceFilter, matchesFreeFindsHistoryFilter, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, INTER_REQUEST_JITTER_MS, WINDOW_WAIT_JITTER_MS } from "../src/utils/rate-limit.js";
 
 test("Free Finds configuration is isolated, validates duplicates, bounds, and unsupported cadence", async () => {
@@ -294,6 +294,15 @@ test("Free Finds action priority puts unreviewed actionable history ahead withou
   ];
   listings.sort(compareFreeFindsActionPriority);
   assert.deepEqual(listings.map((listing) => listing.id), ["unreviewed-new", "unreviewed-reappeared", "unreviewed-changed", "unreviewed-repeat", "reviewed-new"]);
+});
+
+test("Free Finds needs-verification filter exposes uncertain saved price or distance signals", () => {
+  const base = { distanceKm: 4 };
+  assert.equal(matchesFreeFindsEvidenceFilter({ ...base, priceSignal: "other_price" }, "all"), true);
+  assert.equal(matchesFreeFindsEvidenceFilter({ ...base, priceSignal: "other_price" }, "needs_verification"), false);
+  assert.equal(matchesFreeFindsEvidenceFilter({ ...base, priceSignal: "listed_at_zero" }, "needs_verification"), true);
+  assert.equal(matchesFreeFindsEvidenceFilter({ ...base, priceSignal: "listed_as_free" }, "needs_verification"), true);
+  assert.equal(matchesFreeFindsEvidenceFilter({ distanceLabel: "Distance unavailable", priceSignal: "other_price" }, "needs_verification"), true);
 });
 
 test("Free Finds bulk review persists only review status for the visible filtered selection", async () => {

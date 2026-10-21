@@ -688,6 +688,9 @@ test("Free Finds is isolated, configuration/review-only, and has no hourly or Ru
   assert.match(source, /data-free-pickup-status/);
   assert.match(source, /pickupStatus/);
   assert.match(source, /freeDistanceFilter/);
+  assert.match(source, /freeEvidenceFilter/);
+  assert.match(source, /Needs verification/);
+  assert.match(source, /evidenceFilter==='all'/);
   assert.match(source, /Distance available/);
   assert.match(source, /Distance unavailable/);
   assert.match(source, /freeDistanceAvailable/);
