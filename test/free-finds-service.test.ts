@@ -25,7 +25,7 @@ function fakeClock(start = "2026-10-13T12:00:00.000Z") {
     now: () => new Date(current),
     setTimeout: (callback: () => void, delay: number) => { const timer = ++id; timers.set(timer, { at: current + delay, callback }); return timer; },
     clearTimeout: (timer: unknown) => { timers.delete(timer as number); },
-    async advance(ms: number) { current += ms; const due = [...timers.entries()].filter(([, value]) => value.at <= current); for (const [timer, value] of due) { timers.delete(timer); value.callback(); } for (let i = 0; i < 8; i += 1) await new Promise<void>((resolve) => setImmediate(resolve)); },
+    async advance(ms: number) { current += ms; const due = [...timers.entries()].filter(([, value]) => value.at <= current); for (const [timer, value] of due) { timers.delete(timer); value.callback(); } },
     timers,
   };
 }
@@ -66,10 +66,13 @@ test("enabled service schedules one mock run at the hourly cadence and persists 
   const clock = fakeClock();
   await enable(root, new Date(Date.parse("2026-10-13T12:00:00.000Z") + FREE_FINDS_HOURLY_INTERVAL_MS).toISOString());
   let calls = 0;
-  const service = new FreeFindsSchedulerService({ root, now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, run: async () => { calls += 1; return receipt(); } });
+  let resolveRunStarted!: () => void;
+  const runStarted = new Promise<void>((resolve) => { resolveRunStarted = resolve; });
+  const service = new FreeFindsSchedulerService({ root, now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, run: async () => { calls += 1; resolveRunStarted(); return receipt(); } });
   await service.start();
   assert.equal(calls, 0);
   await clock.advance(FREE_FINDS_HOURLY_INTERVAL_MS);
+  await runStarted;
   assert.equal(calls, 1);
   assert.match(service.getHealth().nextRunAt ?? "", /13:00:00/);
   await service.shutdown();
