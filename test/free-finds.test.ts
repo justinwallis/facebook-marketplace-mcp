@@ -6,7 +6,7 @@ import test from "node:test";
 import { DEFAULT_FREE_FINDS_CONFIG, estimateFreeFindsWaitMs, normalizeFreeFindsConfig, previewFreeFindsReadiness, saveFreeFindsConfig, validateFreeFindsConfig } from "../scripts/free-finds-config.js";
 import { FREE_FINDS_PICKUP_STATUSES, loadFreeFindsReviews, saveFreeFindsReview, saveFreeFindsReviews } from "../scripts/free-finds-review.js";
 import { ENABLE_FREE_FINDS_CONFIRMATION, setFreeFindsScheduler } from "../scripts/free-finds-scheduler.js";
-import { classifyFreeFindsPrice, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
+import { classifyFreeFindsPrice, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsHistoryFilter, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, INTER_REQUEST_JITTER_MS, WINDOW_WAIT_JITTER_MS } from "../src/utils/rate-limit.js";
 
 test("Free Finds configuration is isolated, validates duplicates, bounds, and unsupported cadence", async () => {
@@ -251,6 +251,16 @@ test("Free Finds query filter isolates one saved query and preserves unavailable
   assert.deepEqual(filterFreeFindsByQuery(items, "all").map((item) => item.id), ["a", "b", "c"]);
   assert.deepEqual(filterFreeFindsByQuery(items, "free furniture").map((item) => item.id), ["b"]);
   assert.deepEqual(filterFreeFindsByQuery(items, "(query unavailable)").map((item) => item.id), ["c"]);
+});
+
+test("Free Finds history filter isolates new, reappeared, changed, and repeated listings", () => {
+  const base = { changeType: "unchanged" as const, historyPresence: "repeat" as const };
+  assert.equal(matchesFreeFindsHistoryFilter({ ...base, historyPresence: "new" }, "new"), true);
+  assert.equal(matchesFreeFindsHistoryFilter({ ...base, historyPresence: "reappeared" }, "reappeared"), true);
+  assert.equal(matchesFreeFindsHistoryFilter({ ...base, changeType: "updated" }, "changed"), true);
+  assert.equal(matchesFreeFindsHistoryFilter(base, "repeated"), true);
+  assert.equal(matchesFreeFindsHistoryFilter({ ...base, historyPresence: "new" }, "reappeared"), false);
+  assert.equal(matchesFreeFindsHistoryFilter(base, "all"), true);
 });
 
 test("Free Finds needs-attention summary counts saved-result review and health signals", () => {
