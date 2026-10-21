@@ -68,6 +68,17 @@ export function freeFindsDistanceAvailable(item: { distanceKm?: unknown; distanc
   return freeFindsDistanceLabel(item) !== "Distance unavailable";
 }
 
+export type FreeFindsEvidenceFilter = "all" | "needs_verification";
+
+/** Identifies saved-result signals that still need manual verification; it never confirms free status or locality. */
+export function matchesFreeFindsEvidenceFilter(
+  item: Pick<FreeFindsListing, "priceSignal"> & { distanceKm?: unknown; distanceLabel?: unknown },
+  filter: FreeFindsEvidenceFilter,
+): boolean {
+  if (filter === "all") return true;
+  return item.priceSignal !== "other_price" || !freeFindsDistanceAvailable(item);
+}
+
 export function normalizeFreeFindsImageUrl(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
