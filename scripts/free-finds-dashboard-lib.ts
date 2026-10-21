@@ -160,6 +160,24 @@ export function freeFindsPriceSignalLabel(signal: FreeFindsListing["priceSignal"
   return signal === "listed_at_zero" ? "Listed at $0" : signal === "listed_as_free" ? "Listed as free" : signal === "other_price" ? "Other price" : "Price unavailable";
 }
 
+const actionHistoryRank = (item: Pick<FreeFindsListing, "historyPresence" | "changeType">): number =>
+  item.historyPresence === "new" ? 0 : item.historyPresence === "reappeared" ? 1 : item.changeType === "updated" ? 2 : 3;
+const actionPriceRank = (item: Pick<FreeFindsListing, "priceSignal">): number =>
+  item.priceSignal === "listed_at_zero" ? 0 : item.priceSignal === "listed_as_free" ? 1 : item.priceSignal === "other_price" ? 2 : 3;
+
+/** Sort saved results for review urgency; this is not a valuation or free-status ranking. */
+export function compareFreeFindsActionPriority(
+  a: Pick<FreeFindsListing, "review" | "historyPresence" | "changeType" | "priceSignal" | "distanceKm" | "runAt">,
+  b: Pick<FreeFindsListing, "review" | "historyPresence" | "changeType" | "priceSignal" | "distanceKm" | "runAt">,
+): number {
+  const reviewRank = (item: typeof a): number => item.review.status === "Unreviewed" ? 0 : 1;
+  return reviewRank(a) - reviewRank(b)
+    || actionHistoryRank(a) - actionHistoryRank(b)
+    || actionPriceRank(a) - actionPriceRank(b)
+    || (typeof a.distanceKm === "number" && Number.isFinite(a.distanceKm) ? a.distanceKm : Infinity) - (typeof b.distanceKm === "number" && Number.isFinite(b.distanceKm) ? b.distanceKm : Infinity)
+    || (Date.parse(b.runAt ?? "") || 0) - (Date.parse(a.runAt ?? "") || 0);
+}
+
 function changes(previous: Record<string, any>, current: Record<string, any>): FreeFindsChange[] {
   const fields: Array<[FreeFindsChange["field"], string]> = [["price", "price"], ["title", "title"], ["location", "location"], ["pending/availability", "is_pending"], ["URL", "url"]];
   return fields.filter(([, key]) => JSON.stringify(previous[key]) !== JSON.stringify(current[key])).map(([field, key]) => ({ field, previous: field === "pending/availability" ? previous[key] === true ? "Pending" : previous[key] === false ? "Available" : display(previous[key]) : display(previous[key]), current: field === "pending/availability" ? current[key] === true ? "Pending" : current[key] === false ? "Available" : display(current[key]) : display(current[key]) }));

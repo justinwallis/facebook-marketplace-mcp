@@ -6,7 +6,7 @@ import test from "node:test";
 import { DEFAULT_FREE_FINDS_CONFIG, estimateFreeFindsWaitMs, normalizeFreeFindsConfig, previewFreeFindsReadiness, saveFreeFindsConfig, validateFreeFindsConfig } from "../scripts/free-finds-config.js";
 import { FREE_FINDS_PICKUP_STATUSES, loadFreeFindsReviews, saveFreeFindsReview, saveFreeFindsReviews } from "../scripts/free-finds-review.js";
 import { ENABLE_FREE_FINDS_CONFIRMATION, setFreeFindsScheduler } from "../scripts/free-finds-scheduler.js";
-import { classifyFreeFindsPrice, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsHistoryFilter, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
+import { classifyFreeFindsPrice, compareFreeFindsActionPriority, filterFreeFindsByQuery, FREE_FINDS_STALE_AFTER_MS, freeFindsDistanceAvailable, freeFindsDistanceLabel, loadFreeFindsListings, loadFreeFindsRunHistory, matchesFreeFindsHistoryFilter, matchesFreeFindsTriage, normalizeFreeFindsImageUrl, selectFreeFindsBulkIds, summarizeFreeFindsAttention, summarizeFreeFindsListings } from "../scripts/free-finds-dashboard-lib.js";
 import { DEFAULT_MAX_REQUESTS_PER_MINUTE, INTER_REQUEST_JITTER_MS, WINDOW_WAIT_JITTER_MS } from "../src/utils/rate-limit.js";
 
 test("Free Finds configuration is isolated, validates duplicates, bounds, and unsupported cadence", async () => {
@@ -281,6 +281,19 @@ test("Free Finds needs-attention summary counts saved-result review and health s
     unavailablePrice: 1,
   });
   assert.equal(summarizeFreeFindsAttention(items, { resultsAreStale: false, malformedReports: [] }).staleResults, 0);
+});
+
+test("Free Finds action priority puts unreviewed actionable history ahead without claiming value", () => {
+  const item = (id: string, review: "Unreviewed" | "Interested", historyPresence: "new" | "reappeared" | "repeat", changeType: "updated" | "unchanged", priceSignal: "listed_at_zero" | "price_unavailable") => ({ id, review: { status: review } as any, historyPresence, changeType, priceSignal, distanceKm: 10, runAt: "2026-10-21T12:00:00.000Z" });
+  const listings = [
+    item("reviewed-new", "Interested", "new", "unchanged", "listed_at_zero"),
+    item("unreviewed-repeat", "Unreviewed", "repeat", "unchanged", "listed_at_zero"),
+    item("unreviewed-changed", "Unreviewed", "repeat", "updated", "price_unavailable"),
+    item("unreviewed-reappeared", "Unreviewed", "reappeared", "unchanged", "price_unavailable"),
+    item("unreviewed-new", "Unreviewed", "new", "unchanged", "price_unavailable"),
+  ];
+  listings.sort(compareFreeFindsActionPriority);
+  assert.deepEqual(listings.map((listing) => listing.id), ["unreviewed-new", "unreviewed-reappeared", "unreviewed-changed", "unreviewed-repeat", "reviewed-new"]);
 });
 
 test("Free Finds bulk review persists only review status for the visible filtered selection", async () => {

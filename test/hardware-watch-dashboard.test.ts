@@ -670,6 +670,9 @@ test("Free Finds is isolated, configuration/review-only, and has no hourly or Ru
   assert.match(source, /freePriceSignal/);
   assert.match(source, /value="price_signal">Price signal/);
   assert.match(source, /sort==='price_signal'/);
+  assert.match(source, /Action priority \(saved signals\)/);
+  assert.match(source, /sort==='action_priority'/);
+  assert.match(source, /freeActionPriority/);
   assert.match(source, /historyPresence/);
   assert.match(source, /New to retained history/);
   assert.match(source, /Reappeared after an absence/);
