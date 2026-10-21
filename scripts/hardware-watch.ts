@@ -40,7 +40,7 @@ type Listing = {
   coordinates?: { latitude?: number; longitude?: number };
 };
 
-type State = { seenIds: string[]; lastRunAt: string | null };
+type State = { seenIds: string[]; lastRunAt: string | null; lastSnapshotIds?: string[] };
 type DriveUpload = {
   status: "uploaded" | "not_configured" | "skipped_run_errors" | "failed";
   folder?: string;
@@ -116,10 +116,31 @@ async function loadState(): Promise<State> {
     return {
       seenIds: Array.isArray(parsed.seenIds) ? parsed.seenIds.filter((id): id is string => typeof id === "string") : [],
       lastRunAt: typeof parsed.lastRunAt === "string" ? parsed.lastRunAt : null,
+      lastSnapshotIds: Array.isArray(parsed.lastSnapshotIds) ? parsed.lastSnapshotIds.filter((id): id is string => typeof id === "string") : undefined,
     };
   } catch {
     return { seenIds: [], lastRunAt: null };
   }
+}
+
+const isSyntheticPlaceholderId = (id: unknown): boolean => typeof id === "string" && id.includes("IN_MEMORY_MARKETPLACE_FEED_STORY_ENT");
+
+async function loadPreviousSnapshotIds(state: State): Promise<Set<string> | null> {
+  if (!state.lastRunAt) return null;
+  if (Array.isArray(state.lastSnapshotIds)) return new Set(state.lastSnapshotIds.filter((id) => !isSyntheticPlaceholderId(id)));
+  try {
+    const names = await readdir(outputRoot);
+    for (const name of names.filter((value) => value.startsWith("report-") && value.endsWith(".json"))) {
+      const data = JSON.parse(await readFile(resolve(outputRoot, name), "utf8")) as Record<string, unknown>;
+      if (data.runAt !== state.lastRunAt) continue;
+      const snapshot = Array.isArray(data.rawListings) ? data.rawListings : Array.isArray(data.newListings) ? data.newListings : null;
+      if (!snapshot) return null;
+      return new Set(snapshot.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && typeof (value as Record<string, unknown>).id === "string").map((value) => String(value.id)).filter((id) => !isSyntheticPlaceholderId(id)));
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function markdownReport(report: any): string {
@@ -129,13 +150,17 @@ function markdownReport(report: any): string {
     `Read-only Facebook Marketplace search around Churchville, Maryland (${center.latitude}, ${center.longitude}), radius ${radiusKm} km.`,
     "Bounded method: per-query limits and page counts from the applied local configuration; no Marketplace monitors, no seller contact, no purchases.",
     "",
-    `New unique listings: ${report.newListings.length}`,
+    `New qualifying IDs not in prior watcher state: ${report.newListings.length}`,
+    `New IDs since previous comparable snapshot: ${report.snapshotComparisonStatus === "available" ? report.newSincePreviousSnapshot.length : "unavailable"}`,
+    "Newly posted Marketplace items: unavailable from saved report evidence.",
+    `Disappeared since previous snapshot: ${report.disappearedSincePreviousSnapshot.length}`,
+    `Reappeared after an absence: ${report.reappearedSincePreviousSnapshot.length}`,
     `Search errors: ${report.errors.length}`,
     "",
     "## New candidates",
     "",
   ];
-  if (!report.newListings.length) lines.push("No new unique listings since the previous run.", "");
+  if (!report.newListings.length) lines.push("No new qualifying IDs were added to the prior watcher state.", "");
   for (const listing of report.newListings) {
     lines.push(`- **${listing.title}** — ${listing.price} — ${listing.location} — ${listing.url}`);
     lines.push(`  - category: ${listing.kind}; score: ${listing.score}; distance: ${listing.distanceLabel}; pending: ${listing.is_pending}`);
@@ -157,6 +182,8 @@ progress("startup: preparing output and MCP session");
 await mkdir(outputRoot, { recursive: true });
 const state = await loadState();
 const previousIds = new Set(state.seenIds);
+const previousSnapshotIds = await loadPreviousSnapshotIds(state);
+const snapshotComparisonStatus = !state.lastRunAt ? "first_run" : previousSnapshotIds ? "available" : "unavailable";
 const currentIds = new Set<string>();
 const results: any[] = [];
 const errors: any[] = [];
@@ -193,7 +220,7 @@ const searchRun = await runMcpSearches({
   onResponse: ({ kind, query }, response) => {
     const listings = parseOutput(response).listings ?? [];
     for (const listing of listings) {
-      currentIds.add(listing.id);
+      if (!isSyntheticPlaceholderId(listing.id)) currentIds.add(listing.id);
       const existing = allListings.get(listing.id);
       if (existing) existing.queries.push(query);
       else allListings.set(listing.id, { ...listing, kind, queries: [query] });
@@ -206,9 +233,10 @@ progress("filtering: processing returned listings");
 
 const runAt = new Date().toISOString();
 const rawListings = [...allListings.values()].map((listing) => {
+  const diagnosticOnly = isSyntheticPlaceholderId(listing.id);
   const distance = classifyDistance(listing);
   const score = candidateScore(listing, listing.kind);
-  const isCandidate = qualifiesAsLocalCandidate(listing, listing.kind);
+  const isCandidate = !diagnosticOnly && qualifiesAsLocalCandidate(listing, listing.kind);
   return {
     ...listing,
     score,
@@ -217,7 +245,10 @@ const rawListings = [...allListings.values()].map((listing) => {
     distanceMethod: distance.method,
     distanceLabel: distance.distanceKm === null ? "distance unverified" : `${distance.distanceKm} km from Churchville`,
     isCandidate,
-    exclusionReason: distance.status === "out_of_radius"
+    diagnosticOnly,
+    exclusionReason: diagnosticOnly
+      ? "synthetic Marketplace no-results record; diagnostic only"
+      : distance.status === "out_of_radius"
       ? "out of radius"
       : distance.status === "unverified"
         ? "distance unverified"
@@ -226,9 +257,19 @@ const rawListings = [...allListings.values()].map((listing) => {
           : "",
   };
 });
-const newListings = rawListings
+const genuineListings = rawListings.filter((listing) => !listing.diagnosticOnly);
+const newListings = genuineListings
   .filter((listing) => !previousIds.has(listing.id) && listing.isCandidate)
   .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+const newSincePreviousSnapshot = previousSnapshotIds === null
+  ? []
+  : genuineListings.filter((listing) => !previousSnapshotIds.has(listing.id));
+const disappearedSincePreviousSnapshot = previousSnapshotIds === null
+  ? []
+  : [...previousSnapshotIds].filter((id) => !currentIds.has(id));
+const reappearedSincePreviousSnapshot = previousSnapshotIds === null
+  ? []
+  : [...currentIds].filter((id) => !previousSnapshotIds.has(id) && previousIds.has(id));
 
 const nextSeenIds = [...new Set([...state.seenIds, ...currentIds])].slice(-5000);
 const report = {
@@ -246,8 +287,15 @@ const report = {
   results,
   errors,
   newListings,
+  newSincePreviousSnapshot: snapshotComparisonStatus === "available" ? newSincePreviousSnapshot : [],
+  snapshotComparisonStatus,
+  newlyPostedListings: null,
+  newlyPostedStatus: "unavailable_without_posting_history",
+  disappearedSincePreviousSnapshot,
+  reappearedSincePreviousSnapshot,
   rawListings,
-  deduplicatedListingCount: allListings.size,
+  snapshot: { format: "complete", source: "rawListings", listingCount: genuineListings.length, diagnosticOnlyCount: rawListings.length - genuineListings.length },
+  deduplicatedListingCount: genuineListings.length,
   driveUpload: { status: "pending" } as DriveUpload | { status: "pending" },
 };
 const stamp = runAt.replace(/[:.]/g, "-");
@@ -266,6 +314,6 @@ if (report.driveUpload.status === "uploaded") {
   await uploadReports([jsonPath, markdownPath], false);
   progress("Drive upload: final report copies refreshed");
 }
-await writeFile(statePath, `${JSON.stringify({ seenIds: nextSeenIds, lastRunAt: runAt }, null, 2)}\n`, "utf8");
+await writeFile(statePath, `${JSON.stringify({ seenIds: nextSeenIds, lastRunAt: runAt, lastSnapshotIds: [...currentIds] }, null, 2)}\n`, "utf8");
 progress("report write: state complete");
 console.log(JSON.stringify({ runAt, outputRoot, newListings: newListings.length, errors: errors.length, deduplicatedListingCount: allListings.size, driveUpload: report.driveUpload }, null, 2));

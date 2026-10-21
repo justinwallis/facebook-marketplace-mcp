@@ -59,6 +59,9 @@ export type NewSinceLastRun = {
   message: string;
   newListings: DashboardChangeListing[];
   updatedListings: DashboardChangeListing[];
+  disappearedIds: string[];
+  reappearedIds: string[];
+  newlyPostedStatus: "unavailable";
 };
 
 export type RunQuerySummary = {
@@ -402,8 +405,29 @@ function reportListings(report: { data: Record<string, unknown> }): Record<strin
       : null;
   if (!raw) return null;
   const byId = new Map<string, Record<string, unknown>>();
-  for (const value of raw) if (isRecord(value) && typeof value.id === "string" && !byId.has(value.id)) byId.set(value.id, value);
+  for (const value of raw) if (isRecord(value) && typeof value.id === "string" && !isSyntheticPlaceholderId(value.id) && !byId.has(value.id)) byId.set(value.id, value);
   return [...byId.values()];
+}
+
+function syntheticPlaceholderCount(report: { data: Record<string, unknown> }): number {
+  const raw = Array.isArray(report.data.rawListings)
+    ? report.data.rawListings
+    : Array.isArray(report.data.newListings)
+      ? report.data.newListings
+      : [];
+  return raw.filter((value) => isRecord(value) && isSyntheticPlaceholderId(value.id)).length;
+}
+
+export function isSyntheticPlaceholderId(value: unknown): boolean {
+  return typeof value === "string" && value.includes("IN_MEMORY_MARKETPLACE_FEED_STORY_ENT");
+}
+
+function reportSnapshotWarning(report: SavedReport, snapshot: Record<string, unknown>[] | null): string | null {
+  const declared = report.data.deduplicatedListingCount;
+  if (typeof declared !== "number" || !Number.isFinite(declared) || !snapshot) return null;
+  return declared !== snapshot.length
+    ? `deduplicatedListingCount (${declared}) disagrees with the stored comparable snapshot length (${snapshot.length}); raw report preserved for diagnosis.`
+    : null;
 }
 
 function listingChangeFields(value: Record<string, unknown>): Array<[FieldChange["field"], unknown]> {
@@ -494,6 +518,10 @@ function buildHistoryEntry(report: SavedReport, reports: SavedReport[], now: Dat
   if (!runAt) warnings.push("Run timestamp is missing or invalid.");
   if (!raw) warnings.push("Listing snapshot is unavailable; candidate and diagnostic counts are unavailable.");
   if (previousRunAt && !comparison) warnings.push(`The recorded comparison report ${previousRunAt} is missing.`);
+  const snapshotWarning = reportSnapshotWarning(report, raw);
+  if (snapshotWarning) warnings.push(snapshotWarning);
+  const syntheticCount = syntheticPlaceholderCount(report);
+  if (syntheticCount) warnings.push(`${syntheticCount} synthetic no-results record(s) were retained in the raw report for diagnosis and excluded from listing totals.`);
   if (runAt && !Array.isArray(report.data.results)) warnings.push("Per-query result counts are unavailable.");
   if (errors.length && querySummaries(report.data).every((summary) => !summary.error)) warnings.push("The report has run-level errors without per-query attribution.");
   return {
@@ -539,7 +567,7 @@ export async function loadHistoricalRun(reportRoot: string, runAt: string, now =
 }
 
 function emptyChangeState(status: NewSinceLastRun["status"], message: string, runAt: string | null = null, previousRunAt: string | null = null): NewSinceLastRun {
-  return { status, message, runAt, previousRunAt, newListings: [], updatedListings: [] };
+  return { status, message, runAt, previousRunAt, newListings: [], updatedListings: [], disappearedIds: [], reappearedIds: [], newlyPostedStatus: "unavailable" };
 }
 
 export async function loadDashboardData(reportRoot: string, now = new Date()): Promise<DashboardData> {
@@ -641,6 +669,10 @@ export async function loadDashboardData(reportRoot: string, now = new Date()): P
     const previousById = new Map(previousRaw.map((listing) => [listing.id as string, listing]));
     const newChanges: DashboardChangeListing[] = [];
     const updatedChanges: DashboardChangeListing[] = [];
+    const latestIds = new Set(latestRaw.map((listing) => String(listing.id)));
+    const previousIds = new Set(previousRaw.map((listing) => String(listing.id)));
+    const previousIndex = reports.indexOf(previousReport);
+    const olderIds = new Set(reports.slice(previousIndex + 1).flatMap((report) => reportListings(report) ?? []).map((listing) => String(listing.id)));
     for (const value of latestRaw) {
       const listing = normalizeListing(value, latestRunAt);
       if (!listing) continue;
@@ -662,14 +694,19 @@ export async function loadDashboardData(reportRoot: string, now = new Date()): P
       previousRunAt: latestPreviousRunAt,
       newListings: newChanges,
       updatedListings: updatedChanges,
+      disappearedIds: [...previousIds].filter((id) => !latestIds.has(id)),
+      reappearedIds: [...latestIds].filter((id) => !previousIds.has(id) && olderIds.has(id)),
+      newlyPostedStatus: "unavailable",
     };
   }
+  const latestHistoryEntry = runHistory.find((entry) => entry.name === latest.name);
+  if (latestHistoryEntry?.warnings.length) issues.push(...latestHistoryEntry.warnings);
   const allCandidates: DashboardListing[] = [];
   const latestDiagnostics: DashboardListing[] = [];
 
   for (const report of reports) {
     const runAt = reportTimestamp(report.data.runAt);
-    const candidates = Array.isArray(report.data.newListings) ? report.data.newListings : [];
+    const candidates = (Array.isArray(report.data.newListings) ? report.data.newListings : []).filter((value): value is Record<string, unknown> => isRecord(value) && typeof value.id === "string" && !isSyntheticPlaceholderId(value.id));
     for (const value of candidates) {
       const listing = normalizeListing(value, runAt);
       if (listing) {
@@ -681,7 +718,7 @@ export async function loadDashboardData(reportRoot: string, now = new Date()): P
       }
     }
     if (report === latest) {
-      const raw = Array.isArray(report.data.rawListings) ? report.data.rawListings : candidates;
+      const raw = reportListings(report) ?? candidates;
       for (const value of raw) {
         const listing = normalizeListing(value, runAt);
         if (!listing) continue;
@@ -745,6 +782,8 @@ export async function loadDashboardData(reportRoot: string, now = new Date()): P
       ...newSinceLastRun,
       newListings: newSinceLastRun.newListings.map(attachChangeReview),
       updatedListings: newSinceLastRun.updatedListings.map(attachChangeReview),
+      disappearedIds: newSinceLastRun.disappearedIds,
+      reappearedIds: newSinceLastRun.reappearedIds,
     },
     runHistory,
   };

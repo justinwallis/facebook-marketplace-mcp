@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { buildManualReviewChecklist, loadDashboardData, loadHistoricalRun, loadRunHistory, matchesTriageFilter, normalizeImageUrl } from "../scripts/hardware-watch-dashboard-lib.js";
+import { buildManualReviewChecklist, isSyntheticPlaceholderId, loadDashboardData, loadHistoricalRun, loadRunHistory, matchesTriageFilter, normalizeImageUrl } from "../scripts/hardware-watch-dashboard-lib.js";
 import { bulkReviewHistoryPath, loadBulkReviewHistory, loadReviewState, saveListingReview, saveListingReviews, undoBulkReview, undoListingReviews } from "../scripts/hardware-watch-review.js";
 
 async function fixture(report: unknown) {
@@ -41,6 +41,61 @@ test("loads verified candidates and keeps diagnostics separate", async () => {
     assert.equal(data.bestSectionTitle, "Best matches");
     assert.equal(data.newSinceLastRun.status, "first_run");
     assert.equal(data.newSinceLastRun.newListings.length, 0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("uses the complete first-run raw snapshot and does not infer newly posted items", async () => {
+  const directory = await fixture({
+    runAt: "2026-10-13T02:14:40.375Z",
+    previousRunAt: null,
+    errors: [],
+    snapshot: { format: "complete", source: "rawListings", listingCount: 1 },
+    newListings: [],
+    rawListings: [historyListing("first-run")],
+    deduplicatedListingCount: 1,
+    newlyPostedListings: null,
+    newlyPostedStatus: "unavailable_without_posting_history",
+  });
+  try {
+    const data = await loadDashboardData(directory, new Date("2026-10-13T03:00:00Z"));
+    assert.equal(data.candidates.some((item) => item.id === "first-run"), true);
+    assert.equal(data.newSinceLastRun.status, "first_run");
+    assert.equal(data.newSinceLastRun.newlyPostedStatus, "unavailable");
+    assert.match(data.newSinceLastRun.message, /first saved report/i);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("excludes synthetic no-results IDs while preserving a raw-report diagnostic warning", async () => {
+  assert.equal(isSyntheticPlaceholderId("709478570:IN_MEMORY_MARKETPLACE_FEED_STORY_ENT:EntMarketplaceSearchFeedNoResults"), true);
+  assert.equal(isSyntheticPlaceholderId("real-listing"), false);
+  const directory = await fixture({
+    runAt: "2026-10-13T02:14:40.375Z",
+    errors: [],
+    rawListings: [historyListing("real-listing"), { id: "709478570:IN_MEMORY_MARKETPLACE_FEED_STORY_ENT:EntMarketplaceSearchFeedNoResults", title: "", price: "N/A", location: "Unknown", url: "https://example.test/placeholder", kind: "mac" }],
+    deduplicatedListingCount: 1,
+  });
+  try {
+    const data = await loadDashboardData(directory, new Date("2026-10-13T03:00:00Z"));
+    assert.deepEqual(data.candidates.map((item) => item.id), ["real-listing"]);
+    assert.equal(data.diagnostics.some((item) => item.id.includes("IN_MEMORY_MARKETPLACE_FEED_STORY_ENT")), false);
+    assert.ok(data.issues.some((issue) => /synthetic no-results record/i.test(issue)));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("reports count mismatches and keeps disappearance/reappearance explicit", async () => {
+  const directory = await reportSet([
+    { name: "report-2026-10-13T01-00-00-000Z.json", report: { runAt: "2026-10-13T01:00:00.000Z", previousRunAt: null, errors: [], rawListings: [historyListing("old")], deduplicatedListingCount: 1 } },
+    { name: "report-2026-10-13T02-00-00-000Z.json", report: { runAt: "2026-10-13T02:00:00.000Z", previousRunAt: "2026-10-13T01:00:00.000Z", errors: [], rawListings: [historyListing("middle")], deduplicatedListingCount: 1 } },
+    { name: "report-2026-10-13T03-00-00-000Z.json", report: { runAt: "2026-10-13T03:00:00.000Z", previousRunAt: "2026-10-13T02:00:00.000Z", errors: [], rawListings: [historyListing("old"), historyListing("new")], deduplicatedListingCount: 3 } },
+  ]);
+  try {
+    const data = await loadDashboardData(directory, new Date("2026-10-13T04:00:00Z"));
+    assert.deepEqual(data.newSinceLastRun.newListings.map((item) => item.id), ["old", "new"]);
+    assert.deepEqual(data.newSinceLastRun.disappearedIds, ["middle"]);
+    assert.deepEqual(data.newSinceLastRun.reappearedIds, ["old"]);
+    assert.ok(data.issues.some((issue) => /deduplicatedListingCount \(3\).*snapshot length \(2\)/i.test(issue)));
+    const latest = data.runHistory.find((entry) => entry.runAt === "2026-10-13T03:00:00.000Z");
+    assert.ok(latest?.warnings.some((warning) => /disagrees with the stored comparable snapshot/i.test(warning)));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
