@@ -51,6 +51,13 @@ export function matchesFreeFindsTriage(item: Pick<FreeFindsListing, "historyPres
   return item.historyPresence === "new" || item.historyPresence === "reappeared" || item.changeType === "updated";
 }
 
+export type FreeFindsHistoryFilter = "all" | "new" | "reappeared" | "changed" | "repeated";
+export function matchesFreeFindsHistoryFilter(item: Pick<FreeFindsListing, "historyPresence" | "changeType">, filter: FreeFindsHistoryFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "changed") return item.changeType === "updated";
+  return item.historyPresence === (filter === "repeated" ? "repeat" : filter);
+}
+
 export function freeFindsDistanceLabel(item: { distanceKm?: unknown; distanceLabel?: unknown }): string {
   if (typeof item.distanceKm === "number" && Number.isFinite(item.distanceKm)) return `${item.distanceKm.toFixed(1)} km`;
   if (typeof item.distanceLabel === "string" && item.distanceLabel.trim() && !/unavailable|unverified/i.test(item.distanceLabel)) return item.distanceLabel;
