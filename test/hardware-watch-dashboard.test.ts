@@ -699,6 +699,9 @@ test("Free Finds is isolated, configuration/review-only, and has no hourly or Ru
   assert.match(source, /restoreFreeFindsFilters/);
   assert.match(source, /saveFreeFindsFilters/);
   assert.match(source, /freeFindsQuerySummary/);
+  assert.match(source, /freeFindsFilterSummary/);
+  assert.match(source, /Active Free Finds filters/);
+  assert.match(source, /filterParts/);
   assert.match(source, /freeQueryFilter/);
   assert.match(source, /All saved queries/);
   assert.match(source, /queryFilter==='all'/);
